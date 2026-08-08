@@ -138,6 +138,12 @@ func unixNano() int64 {
 }
 
 func main() {
+	// Stamped first thing, before any other work. This is the number the host
+	// measures against, so it has to represent the moment the handler was
+	// entered — taking it later would quietly exclude the stub's own startup
+	// from every measurement.
+	t0 := unixNano()
+
 	// Check if invoked as replace helper
 	if len(os.Args) >= 3 && os.Args[1] == "--replace" {
 		runReplace(os.Args[2], os.Args[3])
@@ -184,7 +190,7 @@ func main() {
 	payload := Payload{
 		Argv: os.Args[1:],
 		Cwd:  cwd,
-		T0:   unixNano(),
+		T0:   t0,
 	}
 
 	// Try to connect to host

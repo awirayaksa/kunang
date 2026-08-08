@@ -12,6 +12,7 @@
     "release": "node scripts/release.mjs",
     "build:stub": "cd stub; go build -ldflags \"-s -w -H=windowsgui\" -o kunangstub.exe .",
     "gen:corpus": "node scripts/gen-corpus.mjs",
+    "bench": "node scripts/bench.mjs",
     "test": "tsx tests/unit/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/"

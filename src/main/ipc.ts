@@ -5,6 +5,7 @@ import { getState, markDirty, getScrollPosition, setScrollPosition } from './sta
 import { readCustomCss } from './paths'
 import { setWindowDirty, resolveSave } from './close-guard'
 import { allowRemoteFor, revokeRemoteFor } from './protocol'
+import { markPaint, completeOpen, isBenchEnabled } from './bench'
 
 export function registerIpcHandlers() {
   ipcMain.handle('read-file', async (_event, filePath: string, force = false) => {
@@ -90,9 +91,22 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.on('paint-done', (event) => {
+    markPaint(event.sender.id)
+
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win && !win.isVisible()) {
       win.show()
+    }
+
+    completeOpen(event.sender.id)
+
+    // Under --bench the window has served its purpose the moment it is
+    // measured. Leaving fifty of them open would change what is being
+    // measured well before the run finished.
+    if (isBenchEnabled() && win && !win.isDestroyed()) {
+      setImmediate(() => {
+        if (!win.isDestroyed()) win.close()
+      })
     }
   })
 }

@@ -3,7 +3,8 @@ import { existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { getDataDir, writeHostPointer } from './paths'
 import { start as startPipeServer } from './pipe'
-import { initWarmSpare, getSpareWindow, getWindows } from './windows'
+import { initWarmSpare, getSpareWindow, getWindows, hasSpareWindow } from './windows'
+import { initBench, beginOpen, markDispatch } from './bench'
 import { registerProtocol } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildMenu } from './menu'
@@ -14,6 +15,10 @@ import { closeAllWatchers, setWatchSink } from './watcher'
 app.setAppUserModelId('com.kunang.app')
 
 app.whenReady().then(async () => {
+  if (process.argv.includes('--bench')) {
+    initBench(getDataDir())
+  }
+
   initTheme(getState().theme)
 
   // Watcher events reach the renderer through here; the watcher module itself
@@ -34,14 +39,26 @@ app.whenReady().then(async () => {
     console.error('Failed to write host pointer:', err)
   }
 
-  const pipeServer = startPipeServer((payload) => {
+  startPipeServer((payload) => {
+    // Remote control channel: the stub forwards its argv, so a second
+    // invocation can ask the resident host to exit. Running --quit in a new
+    // process could never do this — that process loses the pipe election and
+    // quits itself, leaving the actual host untouched.
+    if (payload.argv.includes('--quit')) {
+      app.quit()
+      return
+    }
+
+    const hadSpare = hasSpareWindow()
     const win = getSpareWindow()
     if (!win) return
 
     const fileArgv = payload.argv.filter(a => !a.startsWith('--'))
     const file = fileArgv.length > 0 ? fileArgv[0] : null
 
+    beginOpen(win.webContents.id, payload.t0, !hadSpare)
     win.webContents.send('load', { file, cwd: payload.cwd, t0: payload.t0 })
+    markDispatch(win.webContents.id)
   })
 
   registerProtocol()

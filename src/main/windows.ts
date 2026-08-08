@@ -123,6 +123,12 @@ function rebuildSpare() {
   })
 }
 
+/** Whether the next open will be served from the warm pool. Read before
+ *  getSpareWindow consumes it, to label a bench sample cold or warm. */
+export function hasSpareWindow(): boolean {
+  return spare !== null
+}
+
 export function getSpareWindow(): BrowserWindow | null {
   if (spare) {
     const win = spare
