@@ -1,7 +1,6 @@
 ﻿import { promises as fs } from 'fs'
 import { dirname, basename, join } from 'path'
 import * as cp from 'child_process'
-import { app } from 'electron'
 import { sniffEncoding, detectBom, detectEOL, toUtf8, fromUtf8, canEncode } from './encoding'
 import { getStubPath } from './paths'
 import { trackFile, untrackFile, suppressNextReload } from './watcher'

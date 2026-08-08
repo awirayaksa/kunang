@@ -4,6 +4,10 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "strict": true,
+    // An unused import is how the file watcher and the CP1252 sniffer both
+    // stayed dead for so long: imported, never called, never noticed.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

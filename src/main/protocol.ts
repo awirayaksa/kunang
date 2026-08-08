@@ -1,8 +1,6 @@
-import { BrowserWindow, app, shell, webContents, session } from 'electron'
-import { net } from 'electron'
+﻿import { app, shell, session } from 'electron'
 import { readFile, stat } from 'fs/promises'
-import { extname, resolve, dirname } from 'path'
-import { getWindow } from './windows'
+import { extname } from 'path'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png',
@@ -27,7 +25,7 @@ export function allowRemoteFor(webContentsId: number) {
   remoteAllowed.add(webContentsId)
 }
 
-/** Revoke on navigation to another document — consent was for that file. */
+/** Revoke on navigation to another document â€” consent was for that file. */
 export function revokeRemoteFor(webContentsId: number) {
   remoteAllowed.delete(webContentsId)
 }

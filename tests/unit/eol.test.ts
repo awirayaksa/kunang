@@ -1,7 +1,5 @@
-import { describe, it, assert } from './test-runner'
+﻿import { describe, it, assert } from './test-runner'
 import { detectEOL } from '../../src/main/encoding'
-import { readFileSync, writeFileSync } from 'fs'
-import { join } from 'path'
 
 function normalizeEOL(content: string, eol: string): string {
   return content.replace(/\r?\n/g, eol)

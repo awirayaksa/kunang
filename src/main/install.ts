@@ -1,10 +1,9 @@
-import { app, shell } from 'electron'
+﻿import { app } from 'electron'
 import { execFileSync } from 'child_process'
 import { existsSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
 import { getInstalledStubPath } from './paths'
 
-const APP_ID = 'com.kunang.app'
 const EXE_PATH = process.execPath
 const PIPE_DIR = join(process.env.LOCALAPPDATA || app.getPath('userData'), 'kunang')
 
@@ -17,7 +16,7 @@ const SCHTASKS_EXE = join(SYSTEM32, 'schtasks.exe')
 /**
  * Argument array, not a shell string: the values here are command templates
  * containing their own quotes (`"C:\...\kunangstub.exe" "%1"`), and routing those
- * through cmd strips them — which silently breaks any path with a space in it,
+ * through cmd strips them â€” which silently breaks any path with a space in it,
  * i.e. every user whose name has one.
  */
 function regAdd(key: string, valueName: string, value: string, type = 'REG_SZ') {
@@ -34,7 +33,7 @@ function regDelete(key: string) {
   try {
     execFileSync(REG_EXE, ['delete', key, '/f'], { windowsHide: true })
   } catch {
-    // Key absent — nothing to undo.
+    // Key absent â€” nothing to undo.
   }
 }
 
@@ -70,7 +69,7 @@ export function registerShell() {
 
 /**
  * Explorer caches the extension -> ProgId mapping, so writing the keys above
- * does not by itself change what a double-click does — without this the
+ * does not by itself change what a double-click does â€” without this the
  * association only takes effect at the next logon.
  */
 function notifyShell(stubPath: string) {
@@ -83,7 +82,7 @@ function notifyShell(stubPath: string) {
 
 /**
  * Optional: re-warm the host 30s after every login, so even the first .md open
- * after a reboot is fast. Not created by the portable bootstrap — a portable
+ * after a reboot is fast. Not created by the portable bootstrap â€” a portable
  * app should not silently install an autostart task.
  */
 export function registerLogonTask() {
@@ -123,7 +122,7 @@ export function registerLogonTask() {
 }
 
 function unregisterShell() {
-  // Capture the stub path before the keys go away — it is the thing that can
+  // Capture the stub path before the keys go away â€” it is the thing that can
   // tell the shell to forget them.
   const stubPath = getInstalledStubPath()
 
@@ -143,7 +142,7 @@ export function install() {
   console.log('kunang installed. Double-click .md files to open.')
 }
 
-/** Associations only — no autostart task. Used by the portable first-run path. */
+/** Associations only â€” no autostart task. Used by the portable first-run path. */
 export function installAssociationsOnly() {
   registerShell()
   console.log('kunang associations registered. Double-click .md files to open.')

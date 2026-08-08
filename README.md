@@ -47,8 +47,22 @@ Electron's `requestSingleInstanceLock()` forwarding is deliberately **not** used
 works by launching the whole app a second time to hand off `argv`, which puts full
 Electron boot back on the double-click path.
 
-**Target:** warm p95 ≤ 120ms from double-click to painted text. The benchmark harness
-that proves this (`--bench`) is not built yet — see [Status](#status).
+**Target:** warm p95 ≤ 120ms from double-click to painted text.
+
+`npm run bench` measures it by launching the real stub 50 times — the same binary
+Explorer runs on a double-click — so the numbers include process creation and the
+pipe handshake. Measured on the development machine:
+
+| Hop | p50 | p95 |
+|---|---|---|
+| stub entry → pipe read | 12.0ms | 14.0ms |
+| → dispatched to renderer | +0.0ms | |
+| → renderer painted | +15.5ms | |
+| → window shown | +15.2ms | |
+| **total** | **42.8ms** | **47.7ms** |
+
+Cold, with no host running, bringing the host up takes ~960ms; the first open after
+that is 59.6ms. `npm run bench -- --cold` measures that path.
 
 ## Install
 
@@ -103,7 +117,8 @@ handler until the next logon.
 | Shortcut | Action |
 |---|---|
 | `Ctrl+E` | Toggle edit mode |
-| `Esc` | Back out one level |
+| `Ctrl+F` | Find in page (edit mode uses CodeMirror's own search) |
+| `Esc` | Back out one level — find bar, then edit mode, then the window |
 | `Ctrl+O` | Open file |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As |
 | `Ctrl+\` | Toggle outline sidebar |
@@ -111,24 +126,48 @@ handler until the next logon.
 | `Ctrl+Shift+T` | Cycle theme (auto / light / dark) |
 | `Ctrl` `+` / `-` / `0` | Zoom in / out / reset |
 | `Ctrl+P` | Print |
-| `F5` | Reload from disk |
+| `F5` | Reload from disk (also re-reads `custom.css`) |
 | `Ctrl+W` | Close window (the host survives) |
 
 **Tools** menu also has *Register / Unregister as default .md viewer*.
 
-Markdown is markdown-it with GFM and highlight.js. Files round-trip their encoding
-(UTF-8, UTF-16LE/BE with BOM sniffing, CP1252 fallback) and dominant line ending, so
-git diffs stay clean. Saves are atomic via `ReplaceFileW`, preserving ACLs and
-alternate streams. Open files are watched — a clean buffer reloads silently, a dirty
-one prompts.
+Drop a `.md` file anywhere to open it. Drop images while in edit mode to insert them
+as markdown, linked relative to the open document.
+
+Markdown is markdown-it with GFM and highlight.js. Math (`$…$`, `$$…$$`) and
+```` ```mermaid ```` diagrams render via KaTeX and Mermaid, which are **imported only
+when a document actually contains them** — the double-click path never pays for
+features the document does not use. Documents over 5MB skip syntax highlighting and
+say so, rather than wedging the renderer.
+
+Files round-trip their encoding (UTF-8, UTF-16LE/BE with BOM sniffing, CP1252
+detected by validating the bytes) and their dominant line ending, so git diffs stay
+clean. A CP1252 file that gains a character its encoding cannot represent is promoted
+to UTF-8 rather than having that character replaced with `?`.
+
+Saves are atomic via `ReplaceFileW`, preserving ACLs and alternate streams. Open files
+are watched: a clean buffer reloads silently, a dirty one tells you and waits. Deleting
+the file keeps the buffer — at that point it is the only copy left. Renaming it is
+followed, and the title updates. Closing with unsaved changes prompts.
+
+Scroll position is remembered per file. Drop a stylesheet at
+`%LOCALAPPDATA%\kunang\custom.css` to restyle the document.
 
 ### Security
 
 The renderer is sandboxed (`contextIsolation`, `sandbox: true`, no node integration)
 and talks to main through a narrow `contextBridge` API. Rendered HTML goes through
-DOMPurify. Local images and links are served over a custom `mdfile://` protocol with
-a path guard; **all remote requests are blocked by default**, so a malicious `.md`
-cannot phone home. External links open in your real browser.
+DOMPurify. Local images and links are served over a custom `mdfile://` protocol.
+
+**All remote requests are blocked by default**, so a malicious `.md` cannot phone
+home — a single remote `<img>` is enough to report that a document was opened, and
+from which IP address. When a document wants remote content, a bar says how many
+and offers to load them. That consent is per window and per document, and is
+deliberately **not** persisted: the safe state is the one you get by doing nothing.
+
+Mermaid runs with `securityLevel: 'strict'` and KaTeX with `throwOnError: false`,
+since both are handed text straight from an untrusted document. External links open
+in your real browser.
 
 The named pipe embeds a random 32-hex secret stored in `%LOCALAPPDATA%\kunang\pipe`.
 Node cannot set pipe ACLs, so the unguessable name is what stops another user's
@@ -143,11 +182,20 @@ npm install
 
 npm run dev               # electron-vite dev server
 npm test                  # unit tests
+npm run typecheck         # tsc --noEmit
 npm run build:stub        # just the Go stub (fast iteration)
+npm run gen:corpus        # regenerate the encoding fixtures + 2mb.md
+npm run bench             # 50 warm opens, checks the p95 gate
 
 npm run package:portable  # -> dist/kunang-portable-<version>.exe
 npm run package           # -> dist/kunang Setup <version>.exe  (NSIS)
+npm run release           # bump, tag, push — CI builds and publishes
 ```
+
+Releases are cut with `npm run release` (`-- minor`, `-- major`, or an exact
+`x.y.z`). It refuses to run on a dirty tree, off `main`, or out of sync with the
+remote, then bumps, tags and pushes. Pushing the tag is what builds: a Windows
+runner produces the portable exe and attaches it to the GitHub release.
 
 `npm run package:portable` runs six steps in order:
 
@@ -183,26 +231,28 @@ stub/                  Go — the only non-TypeScript code
   notify.go            SHChangeNotify helper for association changes
   replace_windows.go   ReplaceFileW helper for atomic saves
 src/main/              Electron main: pipe server, warm-spare pool, file I/O,
-                       watcher, mdfile:// protocol, install/registration
+                       watcher, mdfile:// protocol, install/registration,
+                       close guard, bench instrumentation
 src/preload/           contextBridge — the security boundary
 src/renderer/          markdown-it render, CodeMirror 6 editor, morphdom live
-                       preview, scroll sync, outline, HTML export
+                       preview, scroll sync, find, outline, HTML export,
+                       lazy KaTeX/Mermaid
 tests/                 unit tests + a deliberately hostile .md corpus
-scripts/               build-portable.mjs
+scripts/               build-portable, release, bench, gen-corpus
 ```
 
 ## Status
 
-Pre-1.0 and under active development. Working: the resident-host fast path, portable
-single-file build, view and edit modes, encoding round-trip, atomic save, file
-watching, outline, HTML export, theming.
+Pre-1.0 but feature-complete against its original plan. Working: the resident-host
+fast path, portable single-file build, view and edit modes, find, encoding
+round-trip, atomic save, file watching with delete and rename handling, outline,
+HTML export, theming, lazy math and diagrams, drag & drop, `custom.css`, and the
+benchmark gate.
 
 Not yet done:
 
-- `--bench` harness and the warm p95 ≤ 120ms gate
-- Ctrl+F find bar in view mode, dirty indicator, scroll position restore
-- Lazy KaTeX and Mermaid, large-file guard, `custom.css`, drag & drop
-- Remote content consent bar
+- NSIS installer is built but not exercised; only the portable build is released
+- Multiple-window stress test, taskbar grouping, network-drive and WSL paths
 - `idleTimeoutMinutes` — the setting is read from `state.json` but not acted on
 
 ### Known caveats
@@ -215,6 +265,11 @@ Not yet done:
   That is the price of TypeScript instead of C++. `state.json` reserves an
   `idleTimeoutMinutes` escape hatch to trade speed back for memory, but nothing
   acts on it yet.
+- **Rename detection is a heuristic.** Windows reports a rename as an unrelated
+  unlink followed by an add, so they are paired by proximity in time within the
+  same directory. Deleting one file and creating another inside that window looks
+  identical. It errs toward following the file, since the alternative is claiming
+  a document vanished when it did not.
 - **Silent first run.** The portable exe is a GUI-subsystem binary, so unpacking
   shows nothing until the host is up. Failures surface as a message box.
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+﻿import { app } from 'electron'
 import { existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { getDataDir, writeHostPointer } from './paths'
@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
     }
   })
 
-  // Record where we live so the stub's self-healing spawn can find us — it has
+  // Record where we live so the stub's self-healing spawn can find us â€” it has
   // no other way to locate the host once it is registered from the data dir.
   try {
     writeHostPointer()
@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
   startPipeServer((payload) => {
     // Remote control channel: the stub forwards its argv, so a second
     // invocation can ask the resident host to exit. Running --quit in a new
-    // process could never do this — that process loses the pipe election and
+    // process could never do this â€” that process loses the pipe election and
     // quits itself, leaving the actual host untouched.
     if (payload.argv.includes('--quit')) {
       app.quit()
@@ -95,7 +95,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
-  // Do nothing — host survives
+  // Do nothing â€” host survives
 })
 
 app.on('before-quit', () => {
@@ -105,13 +105,9 @@ app.on('before-quit', () => {
   closeAllWatchers()
 })
 
-// --quit command line
-const quitIndex = process.argv.indexOf('--quit')
-if (quitIndex >= 0) {
-  app.whenReady().then(() => {
-    app.quit()
-  })
-}
+// --quit is handled off the pipe, above. Doing it here as well would only ever
+// have quit this process, which loses the pipe election and exits anyway,
+// leaving the resident host running.
 
 // --install / --uninstall
 const installIndex = process.argv.indexOf('--install')

@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from 'electron'
+﻿import { BrowserWindow } from 'electron'
 import { join } from 'path'
 import { getThemeBackground } from './theme'
 import { benchStamp } from './bench'
@@ -135,7 +135,7 @@ export function getSpareWindow(): BrowserWindow | null {
     spare = null
     windows.set(win.id, win)
     trackWindowBounds(win)
-    // Only now that the spare is a real, user-visible window — a spare has no
+    // Only now that the spare is a real, user-visible window â€” a spare has no
     // document and nothing to lose.
     attachCloseGuard(win)
 
