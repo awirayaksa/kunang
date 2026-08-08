@@ -18,6 +18,20 @@ const MIME: Record<string, string> = {
   '.json': 'application/json',
 }
 
+// webContents ids whose user has consented to remote content for the document
+// currently open in them. Deliberately not persisted: consent is re-asked on
+// every open, so the safe state is the one you get by default.
+const remoteAllowed = new Set<number>()
+
+export function allowRemoteFor(webContentsId: number) {
+  remoteAllowed.add(webContentsId)
+}
+
+/** Revoke on navigation to another document — consent was for that file. */
+export function revokeRemoteFor(webContentsId: number) {
+  remoteAllowed.delete(webContentsId)
+}
+
 export function registerProtocol() {
   const ses = session.defaultSession
 
@@ -44,9 +58,12 @@ export function registerProtocol() {
     }
   })
 
-  // Block all non-mdfile requests by default
+  // Block all non-mdfile requests by default. A markdown file is untrusted
+  // input, and a remote image is enough to leak that the document was opened,
+  // along with the reader's IP address.
   ses.webRequest.onBeforeRequest((details, callback) => {
     const url = details.url
+
     if (
       url.startsWith('mdfile://') ||
       url.startsWith('devtools://') ||
@@ -54,9 +71,21 @@ export function registerProtocol() {
       url.startsWith('http://localhost:')
     ) {
       callback({})
-    } else {
-      callback({ cancel: true })
+      return
     }
+
+    // Remote content is permitted only for a window whose user explicitly
+    // consented, and only until that window loads a different document.
+    if (
+      (url.startsWith('https://') || url.startsWith('http://')) &&
+      details.webContentsId !== undefined &&
+      remoteAllowed.has(details.webContentsId)
+    ) {
+      callback({})
+      return
+    }
+
+    callback({ cancel: true })
   })
 
   // External links open in browser

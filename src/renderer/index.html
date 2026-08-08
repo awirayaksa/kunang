@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' mdfile:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src mdfile: data:;">
+  <!-- img-src permits https so that consented remote images can load at all.
+       The actual gate is webRequest in the main process, which blocks them
+       until the user opts in per document. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' mdfile:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src mdfile: data: https:;">
   <title>kunang</title>
   <link rel="stylesheet" href="./styles/view.css">
 </head>
@@ -22,6 +25,11 @@
         </div>
       </div>
     </div>
+  </div>
+  <div id="consent-bar" hidden>
+    <span id="consent-text"></span>
+    <button id="consent-allow" type="button">Load images</button>
+    <button id="consent-dismiss" type="button">Not now</button>
   </div>
   <div id="find-bar" hidden>
     <input id="find-input" type="text" placeholder="Find" spellcheck="false" autocomplete="off">

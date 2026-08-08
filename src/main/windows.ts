@@ -3,6 +3,7 @@ import { join } from 'path'
 import { getThemeBackground } from './theme'
 import { benchStamp } from './bench'
 import { getState, markDirty } from './state'
+import { attachCloseGuard } from './close-guard'
 
 const windows = new Map<number, BrowserWindow>()
 let spare: BrowserWindow | null = null
@@ -84,6 +85,7 @@ export function createWindow(): BrowserWindow {
   const win = createBrowserWindow()
   loadRenderer(win)
   trackWindowBounds(win)
+  attachCloseGuard(win)
 
   const id = win.id
   windows.set(id, win)
@@ -127,6 +129,9 @@ export function getSpareWindow(): BrowserWindow | null {
     spare = null
     windows.set(win.id, win)
     trackWindowBounds(win)
+    // Only now that the spare is a real, user-visible window — a spare has no
+    // document and nothing to lose.
+    attachCloseGuard(win)
 
     win.on('closed', () => {
       windows.delete(win.id)
@@ -140,6 +145,13 @@ export function getSpareWindow(): BrowserWindow | null {
   const win = createBrowserWindow()
   loadRenderer(win)
   trackWindowBounds(win)
+  attachCloseGuard(win)
+  windows.set(win.id, win)
+
+  win.on('closed', () => {
+    windows.delete(win.id)
+  })
+
   return win
 }
 

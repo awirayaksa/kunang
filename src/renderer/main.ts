@@ -16,6 +16,11 @@
   setScroll: (filePath: string, y: number) => void
   getCustomCss: () => Promise<string | null>
   getPathForFile: (file: File) => string
+  setDirty: (dirty: boolean, fileName: string) => void
+  onRequestSave: (callback: () => void) => void
+  saveResult: (ok: boolean) => void
+  allowRemote: () => void
+  revokeRemote: () => void
 }
 
 declare global {
@@ -82,6 +87,8 @@ function setDirty(value: boolean) {
   if (dirty === value) return
   dirty = value
   updateStatus()
+  // The main process owns the close prompt, so it needs to know.
+  window.kunang.setDirty(dirty, currentFile ? currentFile.split(/[\\/]/).pop() || '' : '')
 }
 
 function setStatus(text: string) {
@@ -108,6 +115,7 @@ function showView(text?: string) {
 function renderView(html: string) {
   viewContent.innerHTML = html
   refreshFind()
+  updateConsentBar()
 
   // Say so rather than leaving the user wondering why a large document came
   // back as plain code blocks.
@@ -150,6 +158,7 @@ function enterEdit() {
   // The find bar searches the view pane, which is about to be hidden.
   closeFind()
   showEdit()
+  updateConsentBar()
 }
 
 function enterView() {
@@ -177,6 +186,13 @@ async function loadFile(filePath: string) {
   try {
     setStatus(`Loading ${filePath}...`)
     const doc = await window.kunang.readFile(filePath)
+
+    // Consent was granted for the previous document, not this one.
+    if (filePath !== currentFile && remoteAllowed) {
+      remoteAllowed = false
+      window.kunang.revokeRemote()
+    }
+
     currentFile = filePath
     currentContent = doc.content
     dirty = false
@@ -197,8 +213,12 @@ async function loadFile(filePath: string) {
   }
 }
 
-async function save() {
-  if (!currentFile || !dirty) return
+/** Returns whether the document is now safely on disk — the close prompt
+ *  depends on this to decide whether closing is safe. */
+async function save(): Promise<boolean> {
+  // An untitled buffer has nowhere to go without asking first.
+  if (!currentFile) return saveAs()
+  if (!dirty) return true
 
   const content = isEditMode ? getEditorContent() : currentContent
   try {
@@ -211,22 +231,28 @@ async function save() {
     if (isEditMode) {
       renderView(initRenderer(content, currentFile))
     }
+    return true
   } catch (err) {
     setStatus(`Save failed: ${err}`)
+    return false
   }
 }
 
-async function saveAs() {
+async function saveAs(): Promise<boolean> {
   const content = isEditMode ? getEditorContent() : currentContent
   const path = await window.kunang.saveFileAs(content)
-  if (path) {
-    currentFile = path
-    currentContent = content
-    fileMissing = false
-    setDirty(false)
-    updateStatus()
-    flashStatus('Saved')
-  }
+
+  // Cancelled — nothing was written, and the caller must not treat that as
+  // safe to close over.
+  if (!path) return false
+
+  currentFile = path
+  currentContent = content
+  fileMissing = false
+  setDirty(false)
+  updateStatus()
+  flashStatus('Saved')
+  return true
 }
 
 async function doExport() {
@@ -536,6 +562,55 @@ document.addEventListener(
   true,
 )
 
+// --- Remote content consent --------------------------------------------
+// Remote images are blocked in the main process by default: a markdown file is
+// untrusted input, and one <img> pointing at a remote host is enough to report
+// that the document was opened, and from which IP address.
+
+const consentBar = document.getElementById('consent-bar')!
+const consentText = document.getElementById('consent-text')!
+
+let remoteAllowed = false
+
+function countRemoteImages(): number {
+  return viewContent.querySelectorAll('img[src^="http"]').length
+}
+
+function updateConsentBar() {
+  if (remoteAllowed || isEditMode) {
+    consentBar.hidden = true
+    return
+  }
+
+  const n = countRemoteImages()
+  if (n === 0) {
+    consentBar.hidden = true
+    return
+  }
+
+  consentText.textContent =
+    n === 1
+      ? 'This document loads 1 image from the internet.'
+      : `This document loads ${n} images from the internet.`
+  consentBar.hidden = false
+}
+
+document.getElementById('consent-allow')!.addEventListener('click', () => {
+  remoteAllowed = true
+  consentBar.hidden = true
+  window.kunang.allowRemote()
+
+  // The blocked requests already failed, so re-render to reissue them now
+  // that the main process will let them through.
+  if (currentFile) {
+    renderView(initRenderer(currentContent, currentFile))
+  }
+})
+
+document.getElementById('consent-dismiss')!.addEventListener('click', () => {
+  consentBar.hidden = true
+})
+
 // --- User stylesheet ---------------------------------------------------
 
 async function applyCustomCss() {
@@ -675,9 +750,8 @@ window.kunang.onMenuAction(async (action) => {
   }
 })
 
-window.addEventListener('beforeunload', () => {
-  if (dirty) {
-    // The main process handles the close prompt
-    return false
-  }
+// The main process intercepts close and asks; a renderer cannot both ask a
+// question and act on the answer from beforeunload.
+window.kunang.onRequestSave(async () => {
+  window.kunang.saveResult(await save())
 })

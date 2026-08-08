@@ -43,6 +43,21 @@ const api = {
   setTheme: (mode: 'auto' | 'light' | 'dark') => {
     ipcRenderer.send('set-theme', mode)
   },
+  setDirty: (dirty: boolean, fileName: string) => {
+    ipcRenderer.send('set-dirty', dirty, fileName)
+  },
+  onRequestSave: (callback: () => void) => {
+    ipcRenderer.on('request-save', () => callback())
+  },
+  saveResult: (ok: boolean) => {
+    ipcRenderer.send('save-result', ok)
+  },
+  allowRemote: () => {
+    ipcRenderer.send('allow-remote')
+  },
+  revokeRemote: () => {
+    ipcRenderer.send('revoke-remote')
+  },
   getCustomCss: (): Promise<string | null> => {
     return ipcRenderer.invoke('get-custom-css')
   },

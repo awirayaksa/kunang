@@ -3,6 +3,8 @@ import { openDocument, saveDocument } from './document'
 import { getThemeMode, setThemeMode } from './theme'
 import { getState, markDirty, getScrollPosition, setScrollPosition } from './state'
 import { readCustomCss } from './paths'
+import { setWindowDirty, resolveSave } from './close-guard'
+import { allowRemoteFor, revokeRemoteFor } from './protocol'
 
 export function registerIpcHandlers() {
   ipcMain.handle('read-file', async (_event, filePath: string, force = false) => {
@@ -48,6 +50,23 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('get-app-path', () => {
     return process.execPath
+  })
+
+  ipcMain.on('set-dirty', (event, dirty: boolean, fileName: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) setWindowDirty(win.id, dirty, fileName)
+  })
+
+  ipcMain.on('save-result', (event, ok: boolean) => {
+    resolveSave(event.sender.id, ok)
+  })
+
+  ipcMain.on('allow-remote', (event) => {
+    allowRemoteFor(event.sender.id)
+  })
+
+  ipcMain.on('revoke-remote', (event) => {
+    revokeRemoteFor(event.sender.id)
   })
 
   ipcMain.handle('get-theme', () => getThemeMode())
