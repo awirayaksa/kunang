@@ -60,7 +60,9 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          $version = (Get-Content package.json | ConvertFrom-Json).version
+          # -Raw matters: without it Get-Content streams line by line and
+          # ConvertFrom-Json sees each line as a separate document.
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           # The tag is the release's identity; a mismatch means the tag was
           # created by hand and the built artifact would be misnamed.
           if ($tag -ne "v$version") {
@@ -94,8 +96,20 @@ jobs:
         run: |
           $tag = "${{ steps.v.outputs.tag }}"
           $exe = "dist/kunang-portable-${{ steps.v.outputs.version }}.exe"
-          # Re-runs should replace the assets rather than fail on a existing release.
-          if (gh release view $tag 2>$null) {
+
+          # Actions runs pwsh with $ErrorActionPreference = 'Stop'. A non-zero
+          # exit from a native command can be promoted to a terminating error,
+          # and "no such release" is exactly the exit 1 we need to inspect
+          # rather than die on. Read $LASTEXITCODE instead.
+          $PSNativeCommandUseErrorActionPreference = $false
+
+          gh release view $tag *> $null
+          $exists = ($LASTEXITCODE -eq 0)
+
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          # Re-runs replace the asset rather than failing on an existing release.
+          if ($exists) {
             gh release upload $tag $exe --clobber
           } else {
             gh release create $tag $exe --title $tag --generate-notes
