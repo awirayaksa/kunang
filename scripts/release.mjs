@@ -24,6 +24,19 @@ function run(cmd, args) {
   execFileSync(cmd, args, { cwd: root, stdio: 'inherit' })
 }
 
+// Node 22 refuses to spawn a .cmd shim without shell: true, and routing a
+// commit message containing spaces through cmd.exe is its own quoting hazard.
+// Call npm's JS entry point directly instead. npm sets npm_execpath for the
+// scripts it runs, which is how we get here.
+const npmCli =
+  process.env.npm_execpath && process.env.npm_execpath.endsWith('.js')
+    ? process.env.npm_execpath
+    : join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+
+function npm(args) {
+  run(process.execPath, [npmCli, ...args])
+}
+
 function fail(msg) {
   process.stderr.write(`\nrelease aborted: ${msg}\n`)
   process.exit(1)
@@ -51,11 +64,11 @@ if (git(['rev-parse', 'HEAD']) !== git(['rev-parse', 'origin/main'])) {
 }
 
 process.stdout.write('> npm test\n')
-run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['test'])
+npm(['test'])
 
 // npm version writes package.json + package-lock.json, commits, and tags.
 process.stdout.write(`\n> npm version ${bump}\n`)
-run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['version', bump, '-m', 'Release v%s'])
+npm(['version', bump, '-m', 'Release v%s'])
 
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
