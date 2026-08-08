@@ -1,0 +1,102 @@
+name: Release
+
+# Cut a release with `npm run release`, which pushes a v* tag. That tag is what
+# triggers this workflow. workflow_dispatch is here for re-running a build
+# against an existing tag without cutting a new version.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build (e.g. v0.1.0)'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Must be Windows: the stub is Win32 (named pipes, ReplaceFileW,
+    # SHChangeNotify) and the portable build zips via System.IO.Compression.
+    runs-on: windows-latest
+
+    permissions:
+      contents: write # create the release and upload assets
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0 # full history so release notes can diff against the previous tag
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: stub/go.mod
+          cache-dependency-path: stub/go.sum
+
+      - name: Cache electron-builder downloads
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-eb-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-eb-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version
+        id: v
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          # The tag is the release's identity; a mismatch means the tag was
+          # created by hand and the built artifact would be misnamed.
+          if ($tag -ne "v$version") {
+            Write-Error "tag $tag does not match package.json version $version"
+            exit 1
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "tag=$tag"         | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build portable
+        run: npm run package:portable
+
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          $exe = "dist/kunang-portable-${{ steps.v.outputs.version }}.exe"
+          if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
+          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          # A build that silently produced a stub with no payload would still
+          # exist on disk, so assert it is the real thing.
+          if ($mb -lt 50) { Write-Error "$exe is only ${mb}MB - payload missing?"; exit 1 }
+          Write-Host "$exe is ${mb}MB"
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.v.outputs.tag }}"
+          $exe = "dist/kunang-portable-${{ steps.v.outputs.version }}.exe"
+          # Re-runs should replace the assets rather than fail on a existing release.
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag $exe --clobber
+          } else {
+            gh release create $tag $exe --title $tag --generate-notes
+          }
