@@ -1,0 +1,11 @@
+# Normalize source to LF in the repository.
+* text=auto
+
+# Go sources stay LF in the working tree too.
+*.go text eol=lf
+
+# The test corpus is deliberately hostile: it encodes specific line endings,
+# BOMs and byte sequences that the encoding/EOL round-trip tests assert on.
+# Git must never rewrite it — core.autocrlf would strip crlf.md's CRLF on
+# commit and CRLF-ify the LF fixtures on clone.
+tests/corpus/** -text

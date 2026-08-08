@@ -1,0 +1,211 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1e1e1e;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --link: #0969da;
+  --blockquote-border: #d0d7de;
+  --blockquote-fg: #656d76;
+  --table-border: #d0d7de;
+  --table-stripe: #f6f8fa;
+  --hr: #d0d7de;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --fg: #d4d4d4;
+    --border: #404040;
+    --code-bg: #2d2d2d;
+    --link: #6cb6ff;
+    --blockquote-border: #404040;
+    --blockquote-fg: #9d9d9d;
+    --table-border: #404040;
+    --table-stripe: #252525;
+    --hr: #404040;
+  }
+}
+
+[data-theme="light"] {
+  --bg: #ffffff;
+  --fg: #1e1e1e;
+  --border: #e0e0e0;
+  --code-bg: #f5f5f5;
+  --link: #0969da;
+  --blockquote-border: #d0d7de;
+  --blockquote-fg: #656d76;
+  --table-border: #d0d7de;
+  --table-stripe: #f6f8fa;
+  --hr: #d0d7de;
+}
+
+[data-theme="dark"] {
+  --bg: #1e1e1e;
+  --fg: #d4d4d4;
+  --border: #404040;
+  --code-bg: #2d2d2d;
+  --link: #6cb6ff;
+  --blockquote-border: #404040;
+  --blockquote-fg: #9d9d9d;
+  --table-border: #404040;
+  --table-stripe: #252525;
+  --hr: #404040;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--fg);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+#app {
+  height: calc(100% - 28px);
+  overflow: hidden;
+}
+
+.mode {
+  display: none;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mode.active {
+  display: flex;
+}
+
+#view-mode {
+  overflow-y: auto;
+}
+
+#view-content {
+  max-width: 90ch;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem 2rem;
+}
+
+#edit-panes {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+#source-pane {
+  flex: 1;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+#preview-pane {
+  flex: 1;
+  overflow-y: auto;
+}
+
+#preview-content {
+  max-width: 90ch;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+#status-bar {
+  height: 28px;
+  background: var(--code-bg);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--blockquote-fg);
+}
+
+/* Markdown body styles */
+.markdown-body h1 { font-size: 2em; font-weight: 600; margin: 0.67em 0; padding-bottom: 0.3em; border-bottom: 1px solid var(--hr); }
+.markdown-body h2 { font-size: 1.5em; font-weight: 600; margin: 0.83em 0; padding-bottom: 0.3em; border-bottom: 1px solid var(--hr); }
+.markdown-body h3 { font-size: 1.25em; font-weight: 600; margin: 1em 0; }
+.markdown-body h4 { font-size: 1em; font-weight: 600; margin: 1em 0; }
+.markdown-body h5 { font-size: 0.875em; font-weight: 600; margin: 1em 0; }
+.markdown-body h6 { font-size: 0.85em; font-weight: 600; margin: 1em 0; color: var(--blockquote-fg); }
+
+.markdown-body p { margin: 0 0 1em; }
+
+.markdown-body a { color: var(--link); text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+
+.markdown-body pre {
+  background: var(--code-bg);
+  padding: 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0 0 1em;
+  white-space: pre;
+  word-wrap: normal;
+}
+
+.markdown-body code {
+  font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+  font-size: 0.875em;
+}
+
+.markdown-body :not(pre) > code {
+  background: var(--code-bg);
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+}
+
+.markdown-body blockquote {
+  border-left: 4px solid var(--blockquote-border);
+  padding: 0 1em;
+  color: var(--blockquote-fg);
+  margin: 0 0 1em;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: 2em;
+  margin: 0 0 1em;
+}
+
+.markdown-body li { margin: 0.25em 0; }
+
+.markdown-body img { max-width: 100%; height: auto; }
+
+.markdown-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 1em;
+  display: block;
+  overflow-x: auto;
+}
+
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--table-border);
+  padding: 6px 13px;
+}
+
+.markdown-body th {
+  background: var(--table-stripe);
+  font-weight: 600;
+}
+
+.markdown-body tr:nth-child(even) {
+  background: var(--table-stripe);
+}
+
+.markdown-body hr {
+  border: 0;
+  border-top: 1px solid var(--hr);
+  margin: 1.5em 0;
+}
+
+.markdown-body input[type="checkbox"] {
+  margin-right: 0.5em;
+}

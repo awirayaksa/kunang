@@ -1,0 +1,38 @@
+appId: com.kunang.app
+productName: kunang
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**/*
+  - node_modules/**/*
+extraResources:
+  - from: stub/kunangstub.exe
+    to: stub/kunangstub.exe
+win:
+  # No `portable` target: its NSIS template re-extracts the whole app on every
+  # launch and ExecWaits on it, which the resident-host design cannot survive.
+  # The single-file portable build is scripts/build-portable.mjs instead.
+  target:
+    - target: nsis
+      arch: [x64]
+  fileAssociations:
+    - ext: md
+      name: Markdown
+      description: Markdown Document
+    - ext: markdown
+      name: Markdown
+      description: Markdown Document
+    - ext: mdown
+      name: Markdown
+      description: Markdown Document
+    - ext: mkd
+      name: Markdown
+      description: Markdown Document
+    - ext: mdx
+      name: Markdown
+      description: Markdown Document
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true

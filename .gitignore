@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+
+# Go build artifacts
+stub/*.exe
+stub/payload.zip
+
+# Logs and editor cruft
+*.log
+.DS_Store
+Thumbs.db
+
+# Internal notes — kept locally, not published
+i-want-to-create-fuzzy-storm.md
+TODO.md

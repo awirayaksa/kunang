@@ -1,0 +1,155 @@
+import { BrowserWindow, app } from 'electron'
+import { join } from 'path'
+import { getThemeBackground } from './theme'
+import { benchStamp } from './bench'
+import { loadState, saveState, AppState } from './state'
+
+const windows = new Map<number, BrowserWindow>()
+let spare: BrowserWindow | null = null
+let rebuilding = false
+let lastBounds: { x: number; y: number; width: number; height: number } | null = null
+
+const DEV_SERVER_URL = process.env['ELECTRON_RENDERER_URL']
+const RENDERER_DIST = join(__dirname, '../renderer/index.html')
+
+function loadRenderer(win: BrowserWindow) {
+  if (DEV_SERVER_URL) {
+    win.loadURL(DEV_SERVER_URL)
+  } else {
+    win.loadFile(RENDERER_DIST)
+  }
+}
+
+// Load saved bounds from state at module init
+try {
+  const state = loadState()
+  lastBounds = state.bounds
+} catch {}
+
+function createBrowserWindow(): BrowserWindow {
+  const bg = getThemeBackground()
+
+  const options: Electron.BrowserWindowConstructorOptions = {
+    width: lastBounds?.width || 960,
+    height: lastBounds?.height || 720,
+    minWidth: 400,
+    minHeight: 300,
+    show: false,
+    backgroundColor: bg,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+    title: 'kunang',
+  }
+
+  if (lastBounds?.x !== undefined && lastBounds?.y !== undefined) {
+    options.x = lastBounds.x
+    options.y = lastBounds.y
+  }
+
+  return new BrowserWindow(options)
+}
+
+function trackWindowBounds(win: BrowserWindow) {
+  const save = () => {
+    if (!win.isDestroyed()) {
+      const bounds = win.getBounds()
+      const isMaximized = win.isMaximized()
+      if (!isMaximized && bounds.width > 0 && bounds.height > 0) {
+        lastBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+      }
+      // Persist to state
+      try {
+        const state = loadState()
+        state.bounds = lastBounds
+        saveState(state)
+      } catch {}
+    }
+  }
+
+  win.on('resize', save)
+  win.on('move', save)
+  win.on('close', save)
+}
+
+export function initBounds() {
+  try {
+    const state = loadState()
+    lastBounds = state.bounds
+  } catch {}
+}
+
+export function createWindow(): BrowserWindow {
+  const win = createBrowserWindow()
+  loadRenderer(win)
+  trackWindowBounds(win)
+
+  const id = win.id
+  windows.set(id, win)
+
+  win.on('closed', () => {
+    windows.delete(id)
+  })
+
+  return win
+}
+
+export function initWarmSpare(): Promise<void> {
+  return new Promise((resolve) => {
+    spare = createBrowserWindow()
+    loadRenderer(spare)
+
+    spare.webContents.once('did-finish-load', () => {
+      benchStamp('spare-ready')
+      resolve()
+    })
+  })
+}
+
+function rebuildSpare() {
+  if (rebuilding) return
+  rebuilding = true
+
+  const newSpare = createBrowserWindow()
+  loadRenderer(newSpare)
+
+  newSpare.webContents.once('did-finish-load', () => {
+    spare = newSpare
+    rebuilding = false
+    benchStamp('spare-rebuilt')
+  })
+}
+
+export function getSpareWindow(): BrowserWindow | null {
+  if (spare) {
+    const win = spare
+    spare = null
+    windows.set(win.id, win)
+    trackWindowBounds(win)
+
+    win.on('closed', () => {
+      windows.delete(win.id)
+    })
+
+    rebuildSpare()
+    return win
+  }
+
+  // Fallback: create a new window (cold path)
+  const win = createBrowserWindow()
+  loadRenderer(win)
+  trackWindowBounds(win)
+  return win
+}
+
+export function getWindow(id: number): BrowserWindow | undefined {
+  return windows.get(id)
+}
+
+export function getWindows(): BrowserWindow[] {
+  return Array.from(windows.values())
+}
