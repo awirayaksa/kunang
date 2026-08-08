@@ -1,6 +1,8 @@
 interface KunangAPI {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => void
   onFileChanged: (callback: (payload: { path: string }) => void) => void
+  onFileRemoved: (callback: (payload: { path: string }) => void) => void
+  onFileRenamed: (callback: (payload: { from: string; to: string }) => void) => void
   onMenuAction: (callback: (action: string) => void) => void
   readFile: (filePath: string, force?: boolean) => Promise<{ content: string; encoding: string; bom: boolean; eol: string }>
   saveFile: (filePath: string, content: string) => Promise<void>
@@ -32,6 +34,7 @@ const statusText = document.getElementById('status-text')!
 let currentFile: string | null = null
 let currentContent = ''
 let dirty = false
+let fileMissing = false
 let isEditMode = false
 let zoomLevel = 1
 let themeMode: 'auto' | 'light' | 'dark' = 'auto'
@@ -49,7 +52,15 @@ function clearStatusTimer() {
 // briefly and then it settles back, so a stray "Saved" never masks the path.
 function updateStatus() {
   clearStatusTimer()
-  statusText.textContent = currentFile || 'Ready'
+  if (!currentFile) {
+    statusText.textContent = 'Ready'
+    return
+  }
+  // A deleted file is a persistent condition, not a transient message — it
+  // has to survive the flash timer settling back.
+  statusText.textContent = fileMissing
+    ? `${currentFile} — file no longer exists on disk`
+    : currentFile
 }
 
 function setStatus(text: string) {
@@ -103,6 +114,7 @@ async function loadFile(filePath: string) {
     currentFile = filePath
     currentContent = doc.content
     dirty = false
+    fileMissing = false
 
     const rendered = initRenderer(doc.content, filePath)
     showView(rendered)
@@ -362,23 +374,63 @@ window.kunang.onLoad((payload) => {
 })
 
 window.kunang.onFileChanged(async ({ path: filePath }) => {
-  if (filePath === currentFile && !dirty) {
-    try {
-      const doc = await window.kunang.readFile(filePath)
-      currentContent = doc.content
+  if (filePath !== currentFile) return
 
+  if (dirty) {
+    // Never silently discard the user's edits. Tell them and let them choose.
+    setStatus('File changed on disk. F5 to reload, or save to overwrite.')
+    return
+  }
+
+  try {
+    // force: the cached copy is exactly the stale content we are reacting to.
+    const doc = await window.kunang.readFile(filePath, true)
+    currentContent = doc.content
+    fileMissing = false
+
+    if (isEditMode) {
+      setEditorContent(doc.content)
+      updateEditPreview()
+    } else {
+      viewContent.innerHTML = initRenderer(doc.content, filePath)
+    }
+    updateStatus()
+  } catch {
+    // Raced with a delete; the unlink event will report it.
+  }
+})
+
+window.kunang.onFileRemoved(({ path: filePath }) => {
+  if (filePath !== currentFile) return
+  // Keep the buffer — it is now the only copy left, so discarding it would
+  // destroy data. Saving recreates the file.
+  fileMissing = true
+  updateStatus()
+})
+
+window.kunang.onFileRenamed(async ({ from, to }) => {
+  if (from !== currentFile) return
+
+  currentFile = to
+  fileMissing = false
+  document.title = to.split(/[\\/]/).pop() || 'kunang'
+
+  if (!dirty) {
+    try {
+      const doc = await window.kunang.readFile(to, true)
+      currentContent = doc.content
       if (isEditMode) {
         setEditorContent(doc.content)
+        updateEditPreview()
       } else {
-        const rendered = initRenderer(doc.content, filePath)
-        viewContent.innerHTML = rendered
+        viewContent.innerHTML = initRenderer(doc.content, to)
       }
     } catch {
-      // File may have been deleted
+      fileMissing = true
     }
-  } else if (filePath === currentFile && dirty) {
-    setStatus('File changed on disk. Use F5 to reload, or save to overwrite.')
   }
+
+  flashStatus(`Renamed to ${to.split(/[\\/]/).pop()}`)
 })
 
 // Menu action handler (triggered from native menu bar)

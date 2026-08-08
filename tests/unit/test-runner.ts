@@ -1,4 +1,15 @@
-// Minimal test runner for Node.js unit tests
+// Minimal test runner for Node.js unit tests.
+//
+// describe/it register tests; run() executes them. Registration is separate
+// from execution so that a test body may be async — the watcher tests need to
+// wait on real filesystem events.
+
+type TestFn = () => void | Promise<void>
+
+interface TestCase {
+  name: string
+  fn: TestFn
+}
 
 interface TestResult {
   name: string
@@ -6,13 +17,13 @@ interface TestResult {
   error?: string
 }
 
-interface SuiteResult {
+interface Suite {
   name: string
-  tests: TestResult[]
+  tests: TestCase[]
 }
 
-const suites: SuiteResult[] = []
-let currentSuite: SuiteResult | null = null
+const suites: Suite[] = []
+let currentSuite: Suite | null = null
 
 export function describe(name: string, fn: () => void) {
   currentSuite = { name, tests: [] }
@@ -21,13 +32,11 @@ export function describe(name: string, fn: () => void) {
   currentSuite = null
 }
 
-export function it(name: string, fn: () => void) {
-  try {
-    fn()
-    currentSuite!.tests.push({ name, passed: true })
-  } catch (e: any) {
-    currentSuite!.tests.push({ name, passed: false, error: e.message || String(e) })
+export function it(name: string, fn: TestFn) {
+  if (!currentSuite) {
+    throw new Error(`it("${name}") called outside describe()`)
   }
+  currentSuite.tests.push({ name, fn })
 }
 
 export const assert = {
@@ -51,29 +60,38 @@ export const assert = {
   throws: (fn: () => void) => {
     try {
       fn()
-      throw new Error('Expected function to throw')
-    } catch (e: any) {
-      if (e.message === 'Expected function to throw') throw e
+    } catch {
+      return
     }
+    throw new Error('Expected function to throw')
   },
 }
 
-export function run(): boolean {
+export async function run(): Promise<boolean> {
   let totalTests = 0
   let totalPassed = 0
   let allPassed = true
 
   for (const suite of suites) {
     console.log(`\n${suite.name}`)
+
     for (const test of suite.tests) {
       totalTests++
-      const icon = test.passed ? '  ✓' : '  ✗'
-      console.log(`${icon} ${test.name}`)
-      if (test.passed) {
+
+      let result: TestResult
+      try {
+        await test.fn()
+        result = { name: test.name, passed: true }
+      } catch (e: any) {
+        result = { name: test.name, passed: false, error: e?.message || String(e) }
+      }
+
+      console.log(`${result.passed ? '  ✓' : '  ✗'} ${result.name}`)
+      if (result.passed) {
         totalPassed++
       } else {
         allPassed = false
-        console.log(`    ${test.error}`)
+        console.log(`    ${result.error}`)
       }
     }
   }

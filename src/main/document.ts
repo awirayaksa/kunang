@@ -4,6 +4,7 @@ import * as cp from 'child_process'
 import { app } from 'electron'
 import { sniffEncoding, detectBom, detectEOL, toUtf8 } from './encoding'
 import { getStubPath } from './paths'
+import { trackFile, untrackFile, suppressNextReload } from './watcher'
 
 export interface DocumentState {
   path: string
@@ -21,6 +22,10 @@ export async function openDocument(filePath: string, force = false): Promise<Doc
   // the copy we handed out last time.
   const existing = openDocuments.get(filePath)
   if (existing && !force) return { ...existing }
+
+  // Watch before reading: a file replaced between the read and the watch
+  // would otherwise leave the window showing content nothing will correct.
+  trackFile(filePath)
 
   const buffer = await fs.readFile(filePath)
   const { encoding, bom } = detectBom(buffer)
@@ -65,6 +70,11 @@ export async function saveDocument(filePath: string, content: string): Promise<v
   const base = basename(filePath)
   const tmpPath = join(dir, `.${base}.kunang-tmp`)
 
+  // Our own write would otherwise bounce straight back as a change event and
+  // prompt the user about a conflict with themselves.
+  suppressNextReload(filePath)
+  trackFile(filePath)
+
   await fs.writeFile(tmpPath, buf)
 
   try {
@@ -83,6 +93,7 @@ export async function saveDocument(filePath: string, content: string): Promise<v
 
 export function closeDocument(filePath: string) {
   openDocuments.delete(filePath)
+  untrackFile(filePath)
 }
 
 function normalizeEOL(content: string, eol: string): string {

@@ -3,13 +3,13 @@ import { existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { getDataDir, writeHostPointer } from './paths'
 import { start as startPipeServer } from './pipe'
-import { initWarmSpare, getSpareWindow } from './windows'
+import { initWarmSpare, getSpareWindow, getWindows } from './windows'
 import { registerProtocol } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildMenu } from './menu'
 import { loadState, saveState, AppState } from './state'
 import { initTheme } from './theme'
-import { initWatcher } from './watcher'
+import { closeAllWatchers, setWatchSink } from './watcher'
 
 let state: AppState
 
@@ -18,6 +18,16 @@ app.setAppUserModelId('com.kunang.app')
 app.whenReady().then(async () => {
   state = loadState()
   initTheme(state.theme)
+
+  // Watcher events reach the renderer through here; the watcher module itself
+  // knows nothing about Electron.
+  setWatchSink((channel, payload) => {
+    for (const win of getWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(channel, payload)
+      }
+    }
+  })
 
   // Record where we live so the stub's self-healing spawn can find us — it has
   // no other way to locate the host once it is registered from the data dir.
@@ -76,6 +86,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   saveState(state)
+  closeAllWatchers()
 })
 
 // --quit command line

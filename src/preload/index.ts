@@ -7,6 +7,12 @@ const api = {
   onFileChanged: (callback: (payload: { path: string }) => void) => {
     ipcRenderer.on('file-changed', (_event, payload) => callback(payload))
   },
+  onFileRemoved: (callback: (payload: { path: string }) => void) => {
+    ipcRenderer.on('file-removed', (_event, payload) => callback(payload))
+  },
+  onFileRenamed: (callback: (payload: { from: string; to: string }) => void) => {
+    ipcRenderer.on('file-renamed', (_event, payload) => callback(payload))
+  },
   onMenuAction: (callback: (action: string) => void) => {
     ipcRenderer.on('menu-action', (_event, action: string) => callback(action))
   },
