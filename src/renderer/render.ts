@@ -2,6 +2,7 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
 import { ALLOWED_TAGS, ALLOWED_ATTR, ALLOWED_URI_REGEXP } from './sanitize-config'
+import { installMathRules } from './math-rules'
 
 // Above this size, syntax highlighting is skipped. highlight.js is superlinear
 // on pathological input and a multi-megabyte document with many fences can
@@ -37,6 +38,8 @@ function beginRender(markdown: string) {
   highlightEnabled = markdown.length <= HIGHLIGHT_SIZE_LIMIT
   skippedHighlight = !highlightEnabled
 }
+
+installMathRules(md)
 
 // Custom rule: stamp data-line on every top-level block for scroll sync
 md.renderer.rules.paragraph_open = (tokens, idx) => {
@@ -75,6 +78,12 @@ md.renderer.rules.fence = (tokens, idx) => {
   const line = token.map?.[0] ?? 0
   const info = token.info ? token.info.trim() : ''
   const lang = info.split(/\s+/g)[0]
+
+  // Diagram source is kept as text for the lazy Mermaid pass to pick up. Not
+  // highlighted, because it is about to be replaced by an SVG.
+  if (lang === 'mermaid') {
+    return `<div class="mermaid-block" data-line="${line}">${md.utils.escapeHtml(token.content)}</div>`
+  }
 
   if (highlightEnabled && lang && hljs.getLanguage(lang)) {
     try {

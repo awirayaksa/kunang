@@ -6,7 +6,7 @@
   <!-- img-src permits https so that consented remote images can load at all.
        The actual gate is webRequest in the main process, which blocks them
        until the user opts in per document. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' mdfile:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src mdfile: data: https:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' mdfile:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src mdfile: data: https:; font-src 'self' data:;">
   <title>kunang</title>
   <link rel="stylesheet" href="./styles/view.css">
 </head>

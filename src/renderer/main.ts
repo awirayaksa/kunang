@@ -36,6 +36,7 @@ import { updatePreview } from './preview'
 import { initSync } from './sync'
 import { exportHTML } from './export'
 import { initFind, openFind, closeFind, isFindOpen, refreshFind } from './find'
+import { enhance } from './lazy-render'
 
 const viewMode = document.getElementById('view-mode')!
 const editMode = document.getElementById('edit-mode')!
@@ -112,8 +113,19 @@ function showView(text?: string) {
 
 /** Replace the view's content. Any open find has to re-run afterwards: its
  *  Ranges point at nodes that no longer exist. */
+function isDarkTheme(): boolean {
+  if (themeMode === 'dark') return true
+  if (themeMode === 'light') return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 function renderView(html: string) {
   viewContent.innerHTML = html
+
+  // Math and diagrams resolve asynchronously, after the pane is already
+  // painted — the fast path must not wait on a lazy import.
+  void enhance(viewContent, isDarkTheme())
+
   refreshFind()
   updateConsentBar()
 

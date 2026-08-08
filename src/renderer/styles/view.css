@@ -332,6 +332,52 @@ html, body {
   margin-right: 0.5em;
 }
 
+/* Math and diagrams. Before the lazy import resolves these hold their own
+   source as text, so they must be legible in that state too. */
+.math-block {
+  margin: 1em 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.math-inline {
+  white-space: nowrap;
+}
+
+.math-error,
+.mermaid-error {
+  color: #d1242f;
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.875em;
+}
+
+.mermaid-block {
+  margin: 1em 0;
+  white-space: pre-wrap;
+  font-family: 'Cascadia Mono', 'Consolas', monospace;
+  font-size: 0.875em;
+  color: var(--blockquote-fg);
+}
+
+.mermaid-block.mermaid-rendered {
+  white-space: normal;
+  text-align: center;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  border: 1px dashed #d1242f;
+  padding: 0.5rem;
+  border-radius: 4px;
+}
+
 /* Print: the app is a fixed-height, overflow-hidden shell, which would print
    as a single clipped page. Unwind that and print the rendered document only. */
 @media print {
