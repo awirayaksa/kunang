@@ -128,6 +128,83 @@ html, body {
   color: var(--blockquote-fg);
 }
 
+/* Find bar — overlays the document rather than displacing it, so opening it
+   does not reflow the page and move the text the user is looking for. */
+#find-bar {
+  position: fixed;
+  top: 8px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+}
+
+#find-bar[hidden] {
+  display: none;
+}
+
+#find-input {
+  width: 200px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+#find-input:focus {
+  outline: 1px solid var(--link);
+}
+
+#find-input.no-match {
+  border-color: #d1242f;
+}
+
+#find-count {
+  min-width: 62px;
+  text-align: center;
+  color: var(--blockquote-fg);
+  font-variant-numeric: tabular-nums;
+}
+
+#find-bar button {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--code-bg);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+#find-bar button:hover {
+  background: var(--table-stripe);
+  border-color: var(--link);
+}
+
+/* Painted by the CSS Custom Highlight API. Only background and colour are
+   honoured here, which is why the current match is distinguished by hue
+   rather than by an outline. */
+::highlight(kunang-find) {
+  background: #ffe08a;
+  color: #1e1e1e;
+}
+
+::highlight(kunang-find-current) {
+  background: #ff9632;
+  color: #1e1e1e;
+}
+
 /* Markdown body styles */
 .markdown-body h1 { font-size: 2em; font-weight: 600; margin: 0.67em 0; padding-bottom: 0.3em; border-bottom: 1px solid var(--hr); }
 .markdown-body h2 { font-size: 1.5em; font-weight: 600; margin: 0.83em 0; padding-bottom: 0.3em; border-bottom: 1px solid var(--hr); }

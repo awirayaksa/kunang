@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
+import { ALLOWED_TAGS, ALLOWED_ATTR, ALLOWED_URI_REGEXP } from './sanitize-config'
 
 const md = new MarkdownIt({
   html: false,
@@ -112,33 +113,19 @@ export function initRenderer(markdown: string, docPath: string): string {
     }
   })
 
-  const sanitized = DOMPurify.sanitize(dom.body.innerHTML, {
-    ALLOWED_TAGS: [
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
-      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'em', 'strong',
-      'del', 'ins', 'sup', 'sub', 'a', 'img', 'table', 'thead',
-      'tbody', 'tr', 'th', 'td', 'details', 'summary', 'span', 'div',
-      'input', 'label',
-    ],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id', 'data-line', 'checked', 'disabled', 'type'],
+  return DOMPurify.sanitize(dom.body.innerHTML, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
     ALLOW_DATA_ATTR: true,
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mdfile):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+    ALLOWED_URI_REGEXP,
   })
-
-  return sanitized
 }
 
 export function renderMarkdown(markdown: string): string {
-  const html = md.render(markdown)
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: [
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
-      'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'em', 'strong',
-      'del', 'ins', 'sup', 'sub', 'a', 'img', 'table', 'thead',
-      'tbody', 'tr', 'th', 'td', 'details', 'summary', 'span', 'div',
-      'input', 'label',
-    ],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id', 'data-line', 'checked', 'disabled', 'type'],
+  return DOMPurify.sanitize(md.render(markdown), {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
     ALLOW_DATA_ATTR: true,
+    ALLOWED_URI_REGEXP,
   })
 }

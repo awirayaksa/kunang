@@ -1,4 +1,4 @@
-interface KunangAPI {
+﻿interface KunangAPI {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => void
   onFileChanged: (callback: (payload: { path: string }) => void) => void
   onFileRemoved: (callback: (payload: { path: string }) => void) => void
@@ -27,6 +27,7 @@ import { initEditor, getEditorContent, setEditorContent, onEditorChange } from '
 import { updatePreview } from './preview'
 import { initSync } from './sync'
 import { exportHTML } from './export'
+import { initFind, openFind, closeFind, isFindOpen, refreshFind } from './find'
 
 const viewMode = document.getElementById('view-mode')!
 const editMode = document.getElementById('edit-mode')!
@@ -61,17 +62,17 @@ function updateStatus() {
     return
   }
 
-  // A deleted file is a persistent condition, not a transient message — it
+  // A deleted file is a persistent condition, not a transient message â€” it
   // has to survive the flash timer settling back.
-  const suffix = fileMissing ? ' — file no longer exists on disk' : ''
-  statusText.textContent = `${dirty ? '● ' : ''}${currentFile}${suffix}`
+  const suffix = fileMissing ? ' â€” file no longer exists on disk' : ''
+  statusText.textContent = `${dirty ? 'â— ' : ''}${currentFile}${suffix}`
 }
 
 function updateTitle() {
   const name = currentFile ? currentFile.split(/[\\/]/).pop() : null
   // The bullet is the conventional unsaved marker and is the only dirty cue
   // visible when the window is not focused.
-  document.title = name ? `${dirty ? '● ' : ''}${name}` : 'kunang'
+  document.title = name ? `${dirty ? 'â— ' : ''}${name}` : 'kunang'
 }
 
 function setDirty(value: boolean) {
@@ -95,8 +96,15 @@ function showView(text?: string) {
   editMode.classList.remove('active')
   isEditMode = false
   if (text !== undefined) {
-    viewContent.innerHTML = text
+    renderView(text)
   }
+}
+
+/** Replace the view's content. Any open find has to re-run afterwards: its
+ *  Ranges point at nodes that no longer exist. */
+function renderView(html: string) {
+  viewContent.innerHTML = html
+  refreshFind()
 }
 
 function showEdit() {
@@ -130,6 +138,8 @@ let viewScrollTop = 0
 
 function enterEdit() {
   viewScrollTop = viewMode.scrollTop
+  // The find bar searches the view pane, which is about to be hidden.
+  closeFind()
   showEdit()
 }
 
@@ -190,8 +200,7 @@ async function save() {
     flashStatus('Saved')
 
     if (isEditMode) {
-      const rendered = initRenderer(content, currentFile)
-      viewContent.innerHTML = rendered
+      renderView(initRenderer(content, currentFile))
     }
   } catch (err) {
     setStatus(`Save failed: ${err}`)
@@ -235,7 +244,8 @@ function toggleOutline() {
     sidebar.innerHTML = '<strong>Outline</strong>'
     document.getElementById('app')!.prepend(sidebar)
 
-    const content = isEditMode ? initRenderer(getEditorContent(), '') : viewContent.innerHTML
+    // Both #view-content and #preview-content carry .markdown-body, so this
+    // picks up whichever pane is currently populated.
     const headings = document.querySelectorAll('.markdown-body h1[data-line], .markdown-body h2[data-line], .markdown-body h3[data-line]')
     let html = '<strong style="display:block;margin-bottom:0.5rem">Outline</strong>'
     headings.forEach((h) => {
@@ -277,7 +287,7 @@ function saveScrollSoon() {
 async function restoreScroll(filePath: string) {
   const y = await window.kunang.getScroll(filePath)
   if (!y) return
-  // Only restore if this is still the document on screen — the user may have
+  // Only restore if this is still the document on screen â€” the user may have
   // opened another file while the IPC call was in flight.
   if (currentFile !== filePath) return
 
@@ -327,7 +337,7 @@ async function reloadFile() {
       setEditorContent(doc.content)
       updateEditPreview()
     } else {
-      viewContent.innerHTML = initRenderer(doc.content, currentFile)
+      renderView(initRenderer(doc.content, currentFile))
     }
 
     flashStatus('Reloaded from disk')
@@ -341,7 +351,7 @@ function doPrint() {
   // buffer before printing out of edit mode.
   if (isEditMode) {
     currentContent = getEditorContent()
-    viewContent.innerHTML = initRenderer(currentContent, currentFile || '')
+    renderView(initRenderer(currentContent, currentFile || ''))
   }
   window.print()
 }
@@ -372,6 +382,13 @@ document.addEventListener('keydown', async (e) => {
     toggleEditMode()
   }
 
+  // Edit mode is left alone: CodeMirror's own search panel is already bound to
+  // Ctrl+F and handles the event before it reaches this listener.
+  if (e.ctrlKey && e.key === 'f' && !isEditMode) {
+    e.preventDefault()
+    openFind()
+  }
+
   if (e.ctrlKey && e.shiftKey && e.key === 'S') {
     e.preventDefault()
     await saveAs()
@@ -383,7 +400,11 @@ document.addEventListener('keydown', async (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (isEditMode) {
+    // Esc backs out one level at a time: find bar, then edit mode, then the
+    // window itself.
+    if (isFindOpen()) {
+      closeFind()
+    } else if (isEditMode) {
       enterView()
     } else {
       window.close()
@@ -444,6 +465,8 @@ document.addEventListener('keydown', async (e) => {
   }
 })
 
+initFind(viewMode, viewContent)
+
 // Adopt the persisted theme before the first paint of a reused spare window.
 window.kunang.getTheme().then((mode) => {
   themeMode = mode
@@ -476,7 +499,7 @@ window.kunang.onFileChanged(async ({ path: filePath }) => {
       setEditorContent(doc.content)
       updateEditPreview()
     } else {
-      viewContent.innerHTML = initRenderer(doc.content, filePath)
+      renderView(initRenderer(doc.content, filePath))
     }
     updateStatus()
   } catch {
@@ -486,7 +509,7 @@ window.kunang.onFileChanged(async ({ path: filePath }) => {
 
 window.kunang.onFileRemoved(({ path: filePath }) => {
   if (filePath !== currentFile) return
-  // Keep the buffer — it is now the only copy left, so discarding it would
+  // Keep the buffer â€” it is now the only copy left, so discarding it would
   // destroy data. Saving recreates the file.
   fileMissing = true
   updateStatus()
@@ -507,7 +530,7 @@ window.kunang.onFileRenamed(async ({ from, to }) => {
         setEditorContent(doc.content)
         updateEditPreview()
       } else {
-        viewContent.innerHTML = initRenderer(doc.content, to)
+        renderView(initRenderer(doc.content, to))
       }
     } catch {
       fileMissing = true
