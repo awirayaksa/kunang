@@ -2,7 +2,7 @@ import { BrowserWindow, app } from 'electron'
 import { join } from 'path'
 import { getThemeBackground } from './theme'
 import { benchStamp } from './bench'
-import { loadState, saveState, AppState } from './state'
+import { getState, markDirty } from './state'
 
 const windows = new Map<number, BrowserWindow>()
 let spare: BrowserWindow | null = null
@@ -22,8 +22,7 @@ function loadRenderer(win: BrowserWindow) {
 
 // Load saved bounds from state at module init
 try {
-  const state = loadState()
-  lastBounds = state.bounds
+  lastBounds = getState().bounds
 } catch {}
 
 function createBrowserWindow(): BrowserWindow {
@@ -56,19 +55,18 @@ function createBrowserWindow(): BrowserWindow {
 
 function trackWindowBounds(win: BrowserWindow) {
   const save = () => {
-    if (!win.isDestroyed()) {
-      const bounds = win.getBounds()
-      const isMaximized = win.isMaximized()
-      if (!isMaximized && bounds.width > 0 && bounds.height > 0) {
-        lastBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
-      }
-      // Persist to state
-      try {
-        const state = loadState()
-        state.bounds = lastBounds
-        saveState(state)
-      } catch {}
+    if (win.isDestroyed()) return
+
+    const bounds = win.getBounds()
+    // A maximized window's bounds are the screen, which is not a size worth
+    // restoring to.
+    if (!win.isMaximized() && bounds.width > 0 && bounds.height > 0) {
+      lastBounds = { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
     }
+
+    // Debounced: resize fires continuously while the user drags an edge.
+    getState().bounds = lastBounds
+    markDirty()
   }
 
   win.on('resize', save)
@@ -78,8 +76,7 @@ function trackWindowBounds(win: BrowserWindow) {
 
 export function initBounds() {
   try {
-    const state = loadState()
-    lastBounds = state.bounds
+    lastBounds = getState().bounds
   } catch {}
 }
 

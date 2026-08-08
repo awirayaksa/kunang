@@ -41,11 +41,18 @@ export function initEditor(): EditorView {
 
 let changeCallback: (() => void) | null = null
 
+// Set while we are replacing the document ourselves. changeCallback is module
+// state that outlives any single editor instance, so without this a reload —
+// or simply entering edit mode a second time — fired the previous callback
+// and marked the buffer dirty when the user had typed nothing.
+let applyingProgrammaticEdit = false
+
 export function onEditorChange(callback: () => void) {
   changeCallback = callback
 }
 
 function onContentChange() {
+  if (applyingProgrammaticEdit) return
   changeCallback?.()
 }
 
@@ -54,10 +61,17 @@ export function getEditorContent(): string {
 }
 
 export function setEditorContent(content: string) {
-  if (editorView) {
+  if (!editorView) return
+
+  // dispatch is synchronous, so the flag reliably brackets the update
+  // listener that it triggers.
+  applyingProgrammaticEdit = true
+  try {
     editorView.dispatch({
       changes: { from: 0, to: editorView.state.doc.length, insert: content },
     })
+  } finally {
+    applyingProgrammaticEdit = false
   }
 }
 

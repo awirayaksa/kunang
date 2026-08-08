@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { openDocument, saveDocument } from './document'
 import { getThemeMode, setThemeMode } from './theme'
-import { loadState, saveState } from './state'
+import { getState, markDirty, getScrollPosition, setScrollPosition } from './state'
 
 export function registerIpcHandlers() {
   ipcMain.handle('read-file', async (_event, filePath: string, force = false) => {
@@ -55,9 +55,14 @@ export function registerIpcHandlers() {
     setThemeMode(mode)
     // Persisted so the next window is constructed with a matching
     // backgroundColor — otherwise a dark-theme open flashes white.
-    const state = loadState()
-    state.theme = mode
-    saveState(state)
+    getState().theme = mode
+    markDirty()
+  })
+
+  ipcMain.handle('get-scroll', (_event, filePath: string) => getScrollPosition(filePath))
+
+  ipcMain.on('set-scroll', (_event, filePath: string, y: number) => {
+    setScrollPosition(filePath, y)
   })
 
   ipcMain.on('paint-done', (event) => {

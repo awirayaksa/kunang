@@ -43,6 +43,12 @@ const api = {
   setTheme: (mode: 'auto' | 'light' | 'dark') => {
     ipcRenderer.send('set-theme', mode)
   },
+  getScroll: (filePath: string): Promise<number> => {
+    return ipcRenderer.invoke('get-scroll', filePath)
+  },
+  setScroll: (filePath: string, y: number) => {
+    ipcRenderer.send('set-scroll', filePath, y)
+  },
 }
 
 contextBridge.exposeInMainWorld('kunang', api)

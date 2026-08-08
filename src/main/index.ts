@@ -7,17 +7,14 @@ import { initWarmSpare, getSpareWindow, getWindows } from './windows'
 import { registerProtocol } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildMenu } from './menu'
-import { loadState, saveState, AppState } from './state'
+import { getState, flushStateSync } from './state'
 import { initTheme } from './theme'
 import { closeAllWatchers, setWatchSink } from './watcher'
-
-let state: AppState
 
 app.setAppUserModelId('com.kunang.app')
 
 app.whenReady().then(async () => {
-  state = loadState()
-  initTheme(state.theme)
+  initTheme(getState().theme)
 
   // Watcher events reach the renderer through here; the watcher module itself
   // knows nothing about Electron.
@@ -85,7 +82,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  saveState(state)
+  // Synchronous: an async write queued here would never run, because the
+  // event loop stops as soon as this handler returns.
+  flushStateSync()
   closeAllWatchers()
 })
 

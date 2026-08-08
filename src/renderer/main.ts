@@ -12,6 +12,8 @@ interface KunangAPI {
   getAppPath: () => Promise<string>
   getTheme: () => Promise<'auto' | 'light' | 'dark'>
   setTheme: (mode: 'auto' | 'light' | 'dark') => void
+  getScroll: (filePath: string) => Promise<number>
+  setScroll: (filePath: string, y: number) => void
 }
 
 declare global {
@@ -52,15 +54,30 @@ function clearStatusTimer() {
 // briefly and then it settles back, so a stray "Saved" never masks the path.
 function updateStatus() {
   clearStatusTimer()
+  updateTitle()
+
   if (!currentFile) {
     statusText.textContent = 'Ready'
     return
   }
+
   // A deleted file is a persistent condition, not a transient message — it
   // has to survive the flash timer settling back.
-  statusText.textContent = fileMissing
-    ? `${currentFile} — file no longer exists on disk`
-    : currentFile
+  const suffix = fileMissing ? ' — file no longer exists on disk' : ''
+  statusText.textContent = `${dirty ? '● ' : ''}${currentFile}${suffix}`
+}
+
+function updateTitle() {
+  const name = currentFile ? currentFile.split(/[\\/]/).pop() : null
+  // The bullet is the conventional unsaved marker and is the only dirty cue
+  // visible when the window is not focused.
+  document.title = name ? `${dirty ? '● ' : ''}${name}` : 'kunang'
+}
+
+function setDirty(value: boolean) {
+  if (dirty === value) return
+  dirty = value
+  updateStatus()
 }
 
 function setStatus(text: string) {
@@ -94,7 +111,7 @@ function showEdit() {
   }
 
   onEditorChange(() => {
-    dirty = true
+    setDirty(true)
     updateEditPreview()
   })
 
@@ -105,6 +122,36 @@ function showEdit() {
 function updateEditPreview() {
   const content = getEditorContent()
   updatePreview(content)
+}
+
+// Where the view was scrolled to before entering edit mode, so Esc comes back
+// to the same place instead of jumping to the top.
+let viewScrollTop = 0
+
+function enterEdit() {
+  viewScrollTop = viewMode.scrollTop
+  showEdit()
+}
+
+function enterView() {
+  currentContent = getEditorContent()
+  showView(initRenderer(currentContent, currentFile || ''))
+
+  // Replacing innerHTML resets scrollTop, so restore on the next frame once
+  // the new content has been laid out. Approximate by nature: the document
+  // may have been edited, and the old offset no longer means quite the same
+  // place.
+  requestAnimationFrame(() => {
+    viewMode.scrollTop = viewScrollTop
+  })
+}
+
+function toggleEditMode() {
+  if (isEditMode) {
+    enterView()
+  } else {
+    enterEdit()
+  }
 }
 
 async function loadFile(filePath: string) {
@@ -118,11 +165,13 @@ async function loadFile(filePath: string) {
 
     const rendered = initRenderer(doc.content, filePath)
     showView(rendered)
-
-    document.title = filePath.split(/[\\/]/).pop() || 'kunang'
     updateStatus()
 
     window.kunang.paintDone()
+
+    // After paint, so the restore lands on a laid-out document. Awaiting it
+    // before paintDone would put an IPC round-trip on the critical path.
+    void restoreScroll(filePath)
   } catch (err) {
     setStatus(`Error loading file: ${err}`)
     showView(`<p>Error loading file: ${err}</p>`)
@@ -136,7 +185,8 @@ async function save() {
   try {
     await window.kunang.saveFile(currentFile, content)
     currentContent = content
-    dirty = false
+    fileMissing = false
+    setDirty(false)
     flashStatus('Saved')
 
     if (isEditMode) {
@@ -154,8 +204,9 @@ async function saveAs() {
   if (path) {
     currentFile = path
     currentContent = content
-    dirty = false
-    document.title = path.split(/[\\/]/).pop() || 'kunang'
+    fileMissing = false
+    setDirty(false)
+    updateStatus()
     flashStatus('Saved')
   }
 }
@@ -208,6 +259,46 @@ function toggleOutline() {
   }
 }
 
+// --- Scroll position ---------------------------------------------------
+// #view-mode is the scrolling element; #view-content is just its inner column.
+
+let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function saveScrollSoon() {
+  if (!currentFile || isEditMode) return
+  if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
+  // Scroll fires per frame; persisting each one would hammer state.json.
+  scrollSaveTimer = setTimeout(() => {
+    scrollSaveTimer = null
+    if (currentFile) window.kunang.setScroll(currentFile, viewMode.scrollTop)
+  }, 250)
+}
+
+async function restoreScroll(filePath: string) {
+  const y = await window.kunang.getScroll(filePath)
+  if (!y) return
+  // Only restore if this is still the document on screen — the user may have
+  // opened another file while the IPC call was in flight.
+  if (currentFile !== filePath) return
+
+  // Wait for layout: images and highlighted code can still be resizing, and
+  // scrollTop is clamped to the height known at the time it is assigned.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (currentFile === filePath) viewMode.scrollTop = y
+    })
+  })
+}
+
+viewMode.addEventListener('scroll', saveScrollSoon)
+
+window.addEventListener('pagehide', () => {
+  // Debounced saves would otherwise be lost when the window closes.
+  if (currentFile && !isEditMode) {
+    window.kunang.setScroll(currentFile, viewMode.scrollTop)
+  }
+})
+
 function applyZoom() {
   // CSS zoom rather than Electron's webFrame API: the renderer is sandboxed
   // with no node integration, so webFrame is not reachable from here.
@@ -229,7 +320,8 @@ async function reloadFile() {
     // returned the cache would defeat the entire point of F5.
     const doc = await window.kunang.readFile(currentFile, true)
     currentContent = doc.content
-    dirty = false
+    fileMissing = false
+    setDirty(false)
 
     if (isEditMode) {
       setEditorContent(doc.content)
@@ -277,13 +369,7 @@ function cycleTheme() {
 document.addEventListener('keydown', async (e) => {
   if (e.ctrlKey && e.key === 'e') {
     e.preventDefault()
-    if (isEditMode) {
-      currentContent = getEditorContent()
-      const rendered = initRenderer(currentContent, currentFile || '')
-      showView(rendered)
-    } else {
-      showEdit()
-    }
+    toggleEditMode()
   }
 
   if (e.ctrlKey && e.shiftKey && e.key === 'S') {
@@ -298,9 +384,7 @@ document.addEventListener('keydown', async (e) => {
 
   if (e.key === 'Escape') {
     if (isEditMode) {
-      currentContent = getEditorContent()
-      const rendered = initRenderer(currentContent, currentFile || '')
-      showView(rendered)
+      enterView()
     } else {
       window.close()
     }
@@ -413,7 +497,7 @@ window.kunang.onFileRenamed(async ({ from, to }) => {
 
   currentFile = to
   fileMissing = false
-  document.title = to.split(/[\\/]/).pop() || 'kunang'
+  updateStatus()
 
   if (!dirty) {
     try {
@@ -451,13 +535,7 @@ window.kunang.onMenuAction(async (action) => {
       doPrint()
       break
     case 'toggle-edit':
-      if (isEditMode) {
-        currentContent = getEditorContent()
-        const rendered = initRenderer(currentContent, currentFile || '')
-        showView(rendered)
-      } else {
-        showEdit()
-      }
+      toggleEditMode()
       break
     case 'toggle-outline':
       toggleOutline()
