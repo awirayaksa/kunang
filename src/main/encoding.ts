@@ -69,6 +69,54 @@ export function toUtf8(buffer: Buffer, encoding: string): string {
   return iconv.decode(buffer, 'win1252')
 }
 
+/**
+ * True if every character survives a round-trip through `encoding`.
+ *
+ * Only CP1252 can lose anything: it covers 256 code points, so a document that
+ * gains an em-dash or an emoji while being edited can no longer be written
+ * back as CP1252 without substituting '?'.
+ */
+export function canEncode(content: string, encoding: string): boolean {
+  if (encoding !== 'cp1252') return true
+  return iconv.decode(iconv.encode(content, 'win1252'), 'win1252') === content
+}
+
+/** Inverse of toUtf8: encode a JS string back to the file's original bytes. */
+export function fromUtf8(content: string, encoding: string, bom: boolean): Buffer {
+  if (encoding === 'utf16le') {
+    const buf = Buffer.from(content, 'utf16le')
+    if (!bom) return buf
+    const out = Buffer.alloc(buf.length + 2)
+    out.writeUInt16LE(0xFEFF, 0)
+    buf.copy(out, 2)
+    return out
+  }
+
+  if (encoding === 'utf16be') {
+    const buf = Buffer.from(content, 'utf16le')
+    for (let i = 0; i + 1 < buf.length; i += 2) {
+      const tmp = buf[i]
+      buf[i] = buf[i + 1]
+      buf[i + 1] = tmp
+    }
+    if (!bom) return buf
+    const out = Buffer.alloc(buf.length + 2)
+    out.writeUInt16BE(0xFEFF, 0)
+    buf.copy(out, 2)
+    return out
+  }
+
+  if (encoding === 'cp1252') {
+    // CP1252 has no byte order mark.
+    return iconv.encode(content, 'win1252')
+  }
+
+  if (bom) {
+    return Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from(content, 'utf8')])
+  }
+  return Buffer.from(content, 'utf8')
+}
+
 export function detectEOL(content: string): string {
   let crlf = 0
   let lf = 0

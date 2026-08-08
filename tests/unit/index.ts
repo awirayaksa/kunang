@@ -2,6 +2,7 @@ import './encoding.test'
 import './eol.test'
 import './path-resolution.test'
 import './sanitizer.test'
+import './roundtrip.test'
 import './watcher.test'
 import { run } from './test-runner'
 

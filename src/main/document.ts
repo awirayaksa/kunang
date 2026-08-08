@@ -1,8 +1,8 @@
-import { promises as fs } from 'fs'
+﻿import { promises as fs } from 'fs'
 import { dirname, basename, join } from 'path'
 import * as cp from 'child_process'
 import { app } from 'electron'
-import { sniffEncoding, detectBom, detectEOL, toUtf8 } from './encoding'
+import { sniffEncoding, detectBom, detectEOL, toUtf8, fromUtf8, canEncode } from './encoding'
 import { getStubPath } from './paths'
 import { trackFile, untrackFile, suppressNextReload } from './watcher'
 
@@ -18,7 +18,7 @@ export interface DocumentState {
 const openDocuments = new Map<string, DocumentState>()
 
 export async function openDocument(filePath: string, force = false): Promise<DocumentState> {
-  // force skips the cache — F5 and watcher-driven reloads must see disk, not
+  // force skips the cache â€” F5 and watcher-driven reloads must see disk, not
   // the copy we handed out last time.
   const existing = openDocuments.get(filePath)
   if (existing && !force) return { ...existing }
@@ -28,7 +28,12 @@ export async function openDocument(filePath: string, force = false): Promise<Doc
   trackFile(filePath)
 
   const buffer = await fs.readFile(filePath)
-  const { encoding, bom } = detectBom(buffer)
+
+  // detectBom only reports what a byte order mark declares. A CP1252 file has
+  // no mark, so trusting detectBom alone decoded it as UTF-8 and turned every
+  // accented character into U+FFFD. sniffEncoding validates the bytes.
+  const { bom } = detectBom(buffer)
+  const encoding = sniffEncoding(buffer)
   const content = toUtf8(buffer, encoding)
   const eol = detectEOL(content)
 
@@ -64,7 +69,13 @@ export async function saveDocument(filePath: string, content: string): Promise<v
   }
 
   const output = normalizeEOL(content, doc.eol)
-  const buf = toEncoding(output, doc.encoding, doc.bom)
+
+  // A CP1252 document that gained an em-dash or emoji while being edited can
+  // no longer be written as CP1252 without replacing those characters with
+  // '?'. Promote to UTF-8 instead: it changes the file's encoding, which is
+  // visible and reversible, rather than silently destroying characters.
+  const encoding = canEncode(output, doc.encoding) ? doc.encoding : 'utf8'
+  const buf = fromUtf8(output, encoding, doc.bom)
 
   const dir = dirname(filePath)
   const base = basename(filePath)
@@ -88,6 +99,7 @@ export async function saveDocument(filePath: string, content: string): Promise<v
 
   doc.dirty = false
   doc.content = content
+  doc.encoding = encoding
   openDocuments.set(filePath, doc)
 }
 
@@ -98,41 +110,4 @@ export function closeDocument(filePath: string) {
 
 function normalizeEOL(content: string, eol: string): string {
   return content.replace(/\r?\n/g, eol)
-}
-
-function toEncoding(content: string, encoding: string, bom: boolean): Buffer {
-  if (encoding === 'utf16le') {
-    const buf = Buffer.from(content, 'utf16le')
-    if (bom) {
-      const out = Buffer.alloc(buf.length + 2)
-      out.writeUInt16LE(0xFEFF, 0)
-      buf.copy(out, 2)
-      return out
-    }
-    return buf
-  }
-
-  if (encoding === 'utf16be') {
-    const buf = Buffer.from(content, 'utf16le')
-    // Swap bytes for BE
-    for (let i = 0; i < buf.length; i += 2) {
-      const tmp = buf[i]
-      buf[i] = buf[i + 1]
-      buf[i + 1] = tmp
-    }
-    if (bom) {
-      const out = Buffer.alloc(buf.length + 2)
-      out.writeUInt16BE(0xFEFF, 0)
-      buf.copy(out, 2)
-      return out
-    }
-    return buf
-  }
-
-  // UTF-8 or CP1252
-  if (bom) {
-    const bomBuf = Buffer.from([0xEF, 0xBB, 0xBF])
-    return Buffer.concat([bomBuf, Buffer.from(content, 'utf8')])
-  }
-  return Buffer.from(content, 'utf8')
 }
