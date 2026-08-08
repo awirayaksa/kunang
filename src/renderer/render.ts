@@ -3,13 +3,28 @@ import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
 import { ALLOWED_TAGS, ALLOWED_ATTR, ALLOWED_URI_REGEXP } from './sanitize-config'
 
+// Above this size, syntax highlighting is skipped. highlight.js is superlinear
+// on pathological input and a multi-megabyte document with many fences can
+// wedge the renderer for tens of seconds — the document is better shown
+// unhighlighted than not shown at all.
+const HIGHLIGHT_SIZE_LIMIT = 5 * 1024 * 1024
+
+let highlightEnabled = true
+let skippedHighlight = false
+
+/** True if the last render skipped highlighting because the document was too
+ *  large. Lets the caller say so rather than leaving it unexplained. */
+export function didSkipHighlight(): boolean {
+  return skippedHighlight
+}
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: true,
   breaks: true,
   highlight: (str: string, lang: string): string => {
-    if (lang && hljs.getLanguage(lang)) {
+    if (highlightEnabled && lang && hljs.getLanguage(lang)) {
       try {
         return `<pre><code class="hljs language-${lang}">${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`
       } catch {}
@@ -17,6 +32,11 @@ const md = new MarkdownIt({
     return `<pre><code class="hljs">${md.utils.escapeHtml(str)}</code></pre>`
   },
 })
+
+function beginRender(markdown: string) {
+  highlightEnabled = markdown.length <= HIGHLIGHT_SIZE_LIMIT
+  skippedHighlight = !highlightEnabled
+}
 
 // Custom rule: stamp data-line on every top-level block for scroll sync
 md.renderer.rules.paragraph_open = (tokens, idx) => {
@@ -56,7 +76,7 @@ md.renderer.rules.fence = (tokens, idx) => {
   const info = token.info ? token.info.trim() : ''
   const lang = info.split(/\s+/g)[0]
 
-  if (lang && hljs.getLanguage(lang)) {
+  if (highlightEnabled && lang && hljs.getLanguage(lang)) {
     try {
       const highlighted = hljs.highlight(token.content, { language: lang, ignoreIllegals: true }).value
       return `<pre data-line="${line}"><code class="hljs language-${lang}">${highlighted}</code></pre>`
@@ -94,6 +114,7 @@ function resolveRelativePath(href: string, docPath: string): string {
 }
 
 export function initRenderer(markdown: string, docPath: string): string {
+  beginRender(markdown)
   const html = md.render(markdown)
 
   // Rewrite relative paths to mdfile://
@@ -122,6 +143,7 @@ export function initRenderer(markdown: string, docPath: string): string {
 }
 
 export function renderMarkdown(markdown: string): string {
+  beginRender(markdown)
   return DOMPurify.sanitize(md.render(markdown), {
     ALLOWED_TAGS,
     ALLOWED_ATTR,

@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { openDocument, saveDocument } from './document'
 import { getThemeMode, setThemeMode } from './theme'
 import { getState, markDirty, getScrollPosition, setScrollPosition } from './state'
+import { readCustomCss } from './paths'
 
 export function registerIpcHandlers() {
   ipcMain.handle('read-file', async (_event, filePath: string, force = false) => {
@@ -50,6 +51,10 @@ export function registerIpcHandlers() {
   })
 
   ipcMain.handle('get-theme', () => getThemeMode())
+
+  // Read per call rather than cached, so editing custom.css and pressing F5
+  // picks the change up without restarting the resident host.
+  ipcMain.handle('get-custom-css', () => readCustomCss())
 
   ipcMain.on('set-theme', (_event, mode: 'auto' | 'light' | 'dark') => {
     setThemeMode(mode)

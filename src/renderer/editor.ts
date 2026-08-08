@@ -78,3 +78,17 @@ export function setEditorContent(content: string) {
 export function getEditorView(): EditorView | null {
   return editorView
 }
+
+/** Insert text at the cursor, replacing any selection. Deliberately not
+ *  bracketed by the programmatic-edit flag: this is a user action and should
+ *  mark the buffer dirty. */
+export function insertAtCursor(text: string) {
+  if (!editorView) return
+
+  const { from, to } = editorView.state.selection.main
+  editorView.dispatch({
+    changes: { from, to, insert: text },
+    selection: { anchor: from + text.length },
+  })
+  editorView.focus()
+}

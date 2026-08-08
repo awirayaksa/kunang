@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 const api = {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => {
@@ -42,6 +42,19 @@ const api = {
   },
   setTheme: (mode: 'auto' | 'light' | 'dark') => {
     ipcRenderer.send('set-theme', mode)
+  },
+  getCustomCss: (): Promise<string | null> => {
+    return ipcRenderer.invoke('get-custom-css')
+  },
+  // Electron removed File.path; webUtils is the supported replacement, and it
+  // only exists in the preload, so a dropped file's real path has to be
+  // resolved here.
+  getPathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
   },
   getScroll: (filePath: string): Promise<number> => {
     return ipcRenderer.invoke('get-scroll', filePath)

@@ -8,6 +8,22 @@ export function getDataDir(): string {
   return join(local, 'kunang')
 }
 
+/** Optional user stylesheet, appended to the document's own styles. */
+export function getCustomCssPath(): string {
+  return join(getDataDir(), 'custom.css')
+}
+
+/** Contents of custom.css, or null when absent. */
+export function readCustomCss(): string | null {
+  try {
+    const css = readFileSync(getCustomCssPath(), 'utf8')
+    return css.trim() ? css : null
+  } catch {
+    // Absent is the normal case, not an error.
+    return null
+  }
+}
+
 export function getStubPath(): string {
   // Packaged: stub is in extraResources (resourcesPath/stub/kunangstub.exe)
   const resourcesPath = (process as any).resourcesPath

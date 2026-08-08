@@ -14,6 +14,8 @@
   setTheme: (mode: 'auto' | 'light' | 'dark') => void
   getScroll: (filePath: string) => Promise<number>
   setScroll: (filePath: string, y: number) => void
+  getCustomCss: () => Promise<string | null>
+  getPathForFile: (file: File) => string
 }
 
 declare global {
@@ -22,8 +24,9 @@ declare global {
   }
 }
 
-import { initRenderer } from './render'
-import { initEditor, getEditorContent, setEditorContent, onEditorChange } from './editor'
+import { initRenderer, didSkipHighlight } from './render'
+import { initEditor, getEditorContent, setEditorContent, onEditorChange, insertAtCursor } from './editor'
+import { toRelativePath, basename } from './relpath'
 import { updatePreview } from './preview'
 import { initSync } from './sync'
 import { exportHTML } from './export'
@@ -105,6 +108,12 @@ function showView(text?: string) {
 function renderView(html: string) {
   viewContent.innerHTML = html
   refreshFind()
+
+  // Say so rather than leaving the user wondering why a large document came
+  // back as plain code blocks.
+  if (didSkipHighlight()) {
+    flashStatus('Large file — syntax highlighting disabled')
+  }
 }
 
 function showEdit() {
@@ -325,6 +334,10 @@ function setZoom(level: number) {
 async function reloadFile() {
   if (!currentFile) return
 
+  // F5 is also the way to pick up an edited custom.css without restarting the
+  // resident host.
+  void applyCustomCss()
+
   try {
     // force: the main process caches open documents, and a reload that
     // returned the cache would defeat the entire point of F5.
@@ -464,6 +477,84 @@ document.addEventListener('keydown', async (e) => {
     toggleOutline()
   }
 })
+
+// --- Drag and drop -----------------------------------------------------
+// Both handlers must preventDefault, or Electron navigates the window to the
+// dropped file — and protocol.ts's will-navigate guard would then hand it to
+// the system browser.
+
+const MARKDOWN_RE = /\.(md|markdown|mdown|mkd|mdx)$/i
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i
+
+document.addEventListener('dragover', (e) => {
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+})
+
+// Capture phase: CodeMirror installs its own drop handler on the editor, and
+// this needs to win for file drops before it tries to treat them as text.
+document.addEventListener(
+  'drop',
+  (e) => {
+    const files = Array.from(e.dataTransfer?.files ?? [])
+    if (files.length === 0) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    const paths = files.map((f) => window.kunang.getPathForFile(f)).filter((p) => p.length > 0)
+    if (paths.length === 0) return
+
+    const markdown = paths.find((p) => MARKDOWN_RE.test(p))
+    if (markdown) {
+      void loadFile(markdown)
+      return
+    }
+
+    const images = paths.filter((p) => IMAGE_RE.test(p))
+    if (images.length === 0) {
+      flashStatus('Not a Markdown or image file')
+      return
+    }
+
+    if (!isEditMode) {
+      flashStatus('Drop images in edit mode to insert them')
+      return
+    }
+
+    // Relative to the document, so the link keeps working if the folder moves.
+    // With no open file there is nothing to be relative to, so use the
+    // absolute path.
+    const docDir = currentFile ? currentFile.replace(/[/\\][^/\\]*$/, '') : ''
+    const snippet = images
+      .map((p) => `![${basename(p)}](${docDir ? toRelativePath(docDir, p) : p.replace(/\\/g, '/')})`)
+      .join('\n')
+
+    insertAtCursor(snippet)
+    flashStatus(`Inserted ${images.length} image${images.length === 1 ? '' : 's'}`)
+  },
+  true,
+)
+
+// --- User stylesheet ---------------------------------------------------
+
+async function applyCustomCss() {
+  const css = await window.kunang.getCustomCss()
+  const existing = document.getElementById('kunang-custom-css')
+
+  if (!css) {
+    existing?.remove()
+    return
+  }
+
+  const el = (existing as HTMLStyleElement) || document.createElement('style')
+  el.id = 'kunang-custom-css'
+  el.textContent = css
+  // Appended last so it wins over view.css without needing !important.
+  if (!existing) document.head.appendChild(el)
+}
+
+void applyCustomCss()
 
 initFind(viewMode, viewContent)
 
