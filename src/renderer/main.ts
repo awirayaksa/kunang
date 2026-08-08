@@ -2,12 +2,14 @@ interface KunangAPI {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => void
   onFileChanged: (callback: (payload: { path: string }) => void) => void
   onMenuAction: (callback: (action: string) => void) => void
-  readFile: (filePath: string) => Promise<{ content: string; encoding: string; bom: boolean; eol: string }>
+  readFile: (filePath: string, force?: boolean) => Promise<{ content: string; encoding: string; bom: boolean; eol: string }>
   saveFile: (filePath: string, content: string) => Promise<void>
   saveFileAs: (content: string) => Promise<string | null>
   openFileDialog: () => Promise<string | null>
   paintDone: () => void
   getAppPath: () => Promise<string>
+  getTheme: () => Promise<'auto' | 'light' | 'dark'>
+  setTheme: (mode: 'auto' | 'light' | 'dark') => void
 }
 
 declare global {
@@ -34,8 +36,30 @@ let isEditMode = false
 let zoomLevel = 1
 let themeMode: 'auto' | 'light' | 'dark' = 'auto'
 
+let statusTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearStatusTimer() {
+  if (statusTimer) {
+    clearTimeout(statusTimer)
+    statusTimer = null
+  }
+}
+
+// The status bar shows the open file at rest. Transient messages replace it
+// briefly and then it settles back, so a stray "Saved" never masks the path.
+function updateStatus() {
+  clearStatusTimer()
+  statusText.textContent = currentFile || 'Ready'
+}
+
 function setStatus(text: string) {
-  statusText!.textContent = text
+  clearStatusTimer()
+  statusText.textContent = text
+}
+
+function flashStatus(text: string) {
+  setStatus(text)
+  statusTimer = setTimeout(updateStatus, 2000)
 }
 
 function showView(text?: string) {
@@ -84,7 +108,7 @@ async function loadFile(filePath: string) {
     showView(rendered)
 
     document.title = filePath.split(/[\\/]/).pop() || 'kunang'
-    setStatus(filePath)
+    updateStatus()
 
     window.kunang.paintDone()
   } catch (err) {
@@ -101,7 +125,7 @@ async function save() {
     await window.kunang.saveFile(currentFile, content)
     currentContent = content
     dirty = false
-    setStatus(`Saved ${currentFile}`)
+    flashStatus('Saved')
 
     if (isEditMode) {
       const rendered = initRenderer(content, currentFile)
@@ -119,8 +143,8 @@ async function saveAs() {
     currentFile = path
     currentContent = content
     dirty = false
-    setStatus(`Saved ${path}`)
     document.title = path.split(/[\\/]/).pop() || 'kunang'
+    flashStatus('Saved')
   }
 }
 
@@ -136,7 +160,7 @@ async function doExport() {
   a.download = `${title}.html`
   a.click()
   URL.revokeObjectURL(url)
-  setStatus('Exported HTML')
+  flashStatus('Exported HTML')
 }
 
 function toggleOutline() {
@@ -170,6 +194,71 @@ function toggleOutline() {
   } else {
     sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none'
   }
+}
+
+function applyZoom() {
+  // CSS zoom rather than Electron's webFrame API: the renderer is sandboxed
+  // with no node integration, so webFrame is not reachable from here.
+  document.documentElement.style.zoom = String(zoomLevel)
+  flashStatus(`Zoom ${Math.round(zoomLevel * 100)}%`)
+}
+
+function setZoom(level: number) {
+  // Round to avoid 0.1 increments drifting into 1.0000000000000002.
+  zoomLevel = Math.round(Math.min(2.5, Math.max(0.5, level)) * 100) / 100
+  applyZoom()
+}
+
+async function reloadFile() {
+  if (!currentFile) return
+
+  try {
+    // force: the main process caches open documents, and a reload that
+    // returned the cache would defeat the entire point of F5.
+    const doc = await window.kunang.readFile(currentFile, true)
+    currentContent = doc.content
+    dirty = false
+
+    if (isEditMode) {
+      setEditorContent(doc.content)
+      updateEditPreview()
+    } else {
+      viewContent.innerHTML = initRenderer(doc.content, currentFile)
+    }
+
+    flashStatus('Reloaded from disk')
+  } catch (err) {
+    flashStatus(`Reload failed: ${err}`)
+  }
+}
+
+function doPrint() {
+  // Print CSS forces view mode visible, so make sure it holds the current
+  // buffer before printing out of edit mode.
+  if (isEditMode) {
+    currentContent = getEditorContent()
+    viewContent.innerHTML = initRenderer(currentContent, currentFile || '')
+  }
+  window.print()
+}
+
+function applyTheme() {
+  const root = document.documentElement
+  if (themeMode === 'auto') {
+    // No data-theme at all, so the prefers-color-scheme media query wins.
+    delete root.dataset.theme
+  } else {
+    root.dataset.theme = themeMode
+  }
+}
+
+function cycleTheme() {
+  themeMode = themeMode === 'auto' ? 'light' : themeMode === 'light' ? 'dark' : 'auto'
+  applyTheme()
+  // Persist so the next window's background colour matches and there is no
+  // white flash before the renderer paints.
+  window.kunang.setTheme(themeMode)
+  flashStatus(`Theme: ${themeMode}`)
 }
 
 // Keyboard shortcuts
@@ -220,20 +309,17 @@ document.addEventListener('keydown', async (e) => {
 
   if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
     e.preventDefault()
-    zoomLevel = Math.min(2.5, zoomLevel + 0.1)
-    applyZoom()
+    setZoom(zoomLevel + 0.1)
   }
 
   if (e.ctrlKey && e.key === '-') {
     e.preventDefault()
-    zoomLevel = Math.max(0.5, zoomLevel - 0.1)
-    applyZoom()
+    setZoom(zoomLevel - 0.1)
   }
 
   if (e.ctrlKey && e.key === '0') {
     e.preventDefault()
-    zoomLevel = 1
-    applyZoom()
+    setZoom(1)
   }
 
   if (e.key === 'F5') {
@@ -260,6 +346,12 @@ document.addEventListener('keydown', async (e) => {
     e.preventDefault()
     toggleOutline()
   }
+})
+
+// Adopt the persisted theme before the first paint of a reused spare window.
+window.kunang.getTheme().then((mode) => {
+  themeMode = mode
+  applyTheme()
 })
 
 // IPC listeners
@@ -319,16 +411,13 @@ window.kunang.onMenuAction(async (action) => {
       toggleOutline()
       break
     case 'zoom-in':
-      zoomLevel = Math.min(2.5, zoomLevel + 0.1)
-      applyZoom()
+      setZoom(zoomLevel + 0.1)
       break
     case 'zoom-out':
-      zoomLevel = Math.max(0.5, zoomLevel - 0.1)
-      applyZoom()
+      setZoom(zoomLevel - 0.1)
       break
     case 'zoom-reset':
-      zoomLevel = 1
-      applyZoom()
+      setZoom(1)
       break
     case 'reload':
       await reloadFile()

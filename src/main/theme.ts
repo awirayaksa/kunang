@@ -2,8 +2,8 @@ import { nativeTheme } from 'electron'
 
 let theme: 'auto' | 'light' | 'dark' = 'auto'
 
-export function initTheme() {
-  // Theme is set by renderer via IPC or state.json
+export function initTheme(mode: 'auto' | 'light' | 'dark' = 'auto') {
+  theme = mode
 }
 
 export function setThemeMode(mode: 'auto' | 'light' | 'dark') {

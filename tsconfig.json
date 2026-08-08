@@ -10,11 +10,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "outDir": "./out",
-    "baseUrl": ".",
     "paths": {
-      "@main/*": ["src/main/*"],
-      "@preload/*": ["src/preload/*"],
-      "@renderer/*": ["src/renderer/*"]
+      "@main/*": ["./src/main/*"],
+      "@preload/*": ["./src/preload/*"],
+      "@renderer/*": ["./src/renderer/*"]
     }
   },
   "include": ["src/**/*.ts"],

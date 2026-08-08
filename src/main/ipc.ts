@@ -1,10 +1,11 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
-import { readFile } from 'fs/promises'
 import { openDocument, saveDocument } from './document'
+import { getThemeMode, setThemeMode } from './theme'
+import { loadState, saveState } from './state'
 
 export function registerIpcHandlers() {
-  ipcMain.handle('read-file', async (_event, filePath: string) => {
-    return openDocument(filePath)
+  ipcMain.handle('read-file', async (_event, filePath: string, force = false) => {
+    return openDocument(filePath, force)
   })
 
   ipcMain.handle('save-file', async (_event, filePath: string, content: string) => {
@@ -46,6 +47,17 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('get-app-path', () => {
     return process.execPath
+  })
+
+  ipcMain.handle('get-theme', () => getThemeMode())
+
+  ipcMain.on('set-theme', (_event, mode: 'auto' | 'light' | 'dark') => {
+    setThemeMode(mode)
+    // Persisted so the next window is constructed with a matching
+    // backgroundColor — otherwise a dark-theme open flashes white.
+    const state = loadState()
+    state.theme = mode
+    saveState(state)
   })
 
   ipcMain.on('paint-done', (event) => {

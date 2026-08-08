@@ -1,7 +1,11 @@
-import { Menu, app, dialog } from 'electron'
+import { Menu, app, dialog, BrowserWindow } from 'electron'
 
-function sendAction(win: Electron.BrowserWindow | undefined, action: string) {
-  win?.webContents.send('menu-action', action)
+// Electron hands menu click handlers a BaseWindow, which has no webContents.
+// Narrowing is the honest fix; casting would hide a real null case.
+function sendAction(win: Electron.BaseWindow | undefined, action: string) {
+  if (win instanceof BrowserWindow) {
+    win.webContents.send('menu-action', action)
+  }
 }
 
 export function buildMenu() {

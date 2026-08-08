@@ -16,9 +16,11 @@ export interface DocumentState {
 
 const openDocuments = new Map<string, DocumentState>()
 
-export async function openDocument(filePath: string): Promise<DocumentState> {
+export async function openDocument(filePath: string, force = false): Promise<DocumentState> {
+  // force skips the cache — F5 and watcher-driven reloads must see disk, not
+  // the copy we handed out last time.
   const existing = openDocuments.get(filePath)
-  if (existing) return { ...existing }
+  if (existing && !force) return { ...existing }
 
   const buffer = await fs.readFile(filePath)
   const { encoding, bom } = detectBom(buffer)

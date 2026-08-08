@@ -17,7 +17,7 @@ app.setAppUserModelId('com.kunang.app')
 
 app.whenReady().then(async () => {
   state = loadState()
-  initTheme()
+  initTheme(state.theme)
 
   // Record where we live so the stub's self-healing spawn can find us — it has
   // no other way to locate the host once it is registered from the data dir.
