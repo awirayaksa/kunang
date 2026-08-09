@@ -1,55 +1,69 @@
+/* Brand palette — see resources/BRAND.md.
+   Two hues only, night and amber. Nothing else in this file may introduce a
+   third brand colour; semantic colours (error red) stay desaturated so the
+   amber remains the only thing that glows. */
 :root {
-  --bg: #ffffff;
-  --fg: #1e1e1e;
-  --border: #e0e0e0;
-  --code-bg: #f5f5f5;
-  --link: #0969da;
-  --blockquote-border: #d0d7de;
-  --blockquote-fg: #656d76;
-  --table-border: #d0d7de;
-  --table-stripe: #f6f8fa;
-  --hr: #d0d7de;
+  --night-900: #070B16;
+  --night-800: #0E1426;
+  --tile-hi: #1B2542;
+  --tile-lo: #080C18;
+  --amber-500: #FFB020;
+  --amber-400: #FFC247;
+  --amber-300: #FFD980;
+  --glow: #FFE9A8;
+  --core: #FFFBEC;
+  --paper: #F6F4EF;
+}
+
+/* Semantic mapping. Light is the bare :root so a viewer with no explicit
+   choice still gets a complete palette. */
+:root {
+  --bg: var(--paper);
+  --fg: var(--night-800);
+  --border: #DDD8CC;
+  --code-bg: #EDEAE1;
+  /* Amber darkened until it carries text contrast on paper. Still the brand
+     hue — a blue link would be the third colour BRAND.md rules out. */
+  --link: #8C5A05;
+  --blockquote-border: #D7D1C4;
+  --blockquote-fg: #5C5951;
+  --table-border: #D7D1C4;
+  --table-stripe: #EFECE3;
+  --hr: #DDD8CC;
+  --focus: rgba(255, 233, 168, 0.4);
+  --danger: #A33A33;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1e1e;
-    --fg: #d4d4d4;
-    --border: #404040;
-    --code-bg: #2d2d2d;
-    --link: #6cb6ff;
-    --blockquote-border: #404040;
-    --blockquote-fg: #9d9d9d;
-    --table-border: #404040;
-    --table-stripe: #252525;
-    --hr: #404040;
+  :root:not([data-theme="light"]) {
+    --bg: var(--night-900);
+    --fg: var(--paper);
+    --border: var(--tile-hi);
+    --code-bg: var(--night-800);
+    --link: var(--amber-400);
+    --blockquote-border: var(--tile-hi);
+    --blockquote-fg: #9AA3B8;
+    --table-border: var(--tile-hi);
+    --table-stripe: #0B1120;
+    --hr: var(--tile-hi);
+    --focus: rgba(255, 233, 168, 0.4);
+    --danger: #E08078;
   }
 }
 
-[data-theme="light"] {
-  --bg: #ffffff;
-  --fg: #1e1e1e;
-  --border: #e0e0e0;
-  --code-bg: #f5f5f5;
-  --link: #0969da;
-  --blockquote-border: #d0d7de;
-  --blockquote-fg: #656d76;
-  --table-border: #d0d7de;
-  --table-stripe: #f6f8fa;
-  --hr: #d0d7de;
-}
-
 [data-theme="dark"] {
-  --bg: #1e1e1e;
-  --fg: #d4d4d4;
-  --border: #404040;
-  --code-bg: #2d2d2d;
-  --link: #6cb6ff;
-  --blockquote-border: #404040;
-  --blockquote-fg: #9d9d9d;
-  --table-border: #404040;
-  --table-stripe: #252525;
-  --hr: #404040;
+  --bg: var(--night-900);
+  --fg: var(--paper);
+  --border: var(--tile-hi);
+  --code-bg: var(--night-800);
+  --link: var(--amber-400);
+  --blockquote-border: var(--tile-hi);
+  --blockquote-fg: #9AA3B8;
+  --table-border: var(--tile-hi);
+  --table-stripe: #0B1120;
+  --hr: var(--tile-hi);
+  --focus: rgba(255, 233, 168, 0.4);
+  --danger: #E08078;
 }
 
 * {
@@ -100,15 +114,22 @@ html, body {
   width: 100%;
 }
 
+/* The editor pane is night regardless of theme — BRAND.md is explicit that the
+   source side is dark with an amber caret, and that the caret is the one
+   moving amber element in the interface. The preview follows the theme, so a
+   dark-theme window does not get a page of blinding white beside it. */
 #source-pane {
   flex: 1;
   overflow: hidden;
-  border-right: 1px solid var(--border);
+  background: var(--night-900);
+  /* The active-pane divider, glow at 40%. */
+  border-right: 1px solid var(--focus);
 }
 
 #preview-pane {
   flex: 1;
   overflow-y: auto;
+  background: var(--bg);
 }
 
 #preview-content {
@@ -166,11 +187,19 @@ html, body {
 }
 
 #consent-bar button:hover {
-  border-color: var(--link);
+  border-color: var(--amber-400);
 }
 
+#consent-bar button:focus-visible,
+#find-bar button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The primary action, in amber-500 — BRAND.md's stated use for it. */
 #consent-allow {
   font-weight: 600;
+  border-color: var(--amber-500);
 }
 
 /* Find bar — overlays the document rather than displacing it, so opening it
@@ -207,11 +236,12 @@ html, body {
 }
 
 #find-input:focus {
-  outline: 1px solid var(--link);
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 #find-input.no-match {
-  border-color: #d1242f;
+  border-color: var(--danger);
 }
 
 #find-count {
@@ -234,20 +264,20 @@ html, body {
 
 #find-bar button:hover {
   background: var(--table-stripe);
-  border-color: var(--link);
+  border-color: var(--amber-400);
 }
 
 /* Painted by the CSS Custom Highlight API. Only background and colour are
    honoured here, which is why the current match is distinguished by hue
-   rather than by an outline. */
+   rather than by an outline — glow for the rest, amber for the current one. */
 ::highlight(kunang-find) {
-  background: #ffe08a;
-  color: #1e1e1e;
+  background: var(--glow);
+  color: var(--night-900);
 }
 
 ::highlight(kunang-find-current) {
-  background: #ff9632;
-  color: #1e1e1e;
+  background: var(--amber-400);
+  color: var(--night-900);
 }
 
 /* Markdown body styles */
@@ -346,7 +376,7 @@ html, body {
 
 .math-error,
 .mermaid-error {
-  color: #d1242f;
+  color: var(--danger);
   font-family: 'Cascadia Mono', 'Consolas', monospace;
   font-size: 0.875em;
 }
@@ -373,7 +403,7 @@ html, body {
 }
 
 .mermaid-error {
-  border: 1px dashed #d1242f;
+  border: 1px dashed var(--danger);
   padding: 0.5rem;
   border-radius: 4px;
 }

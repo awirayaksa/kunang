@@ -2,7 +2,7 @@
 import { execFileSync } from 'child_process'
 import { existsSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
-import { getInstalledStubPath } from './paths'
+import { getInstalledStubPath, getInstalledDocIconPath } from './paths'
 
 const EXE_PATH = process.execPath
 const PIPE_DIR = join(process.env.LOCALAPPDATA || app.getPath('userData'), 'kunang')
@@ -62,7 +62,12 @@ export function registerShell() {
   const appKey = 'HKCU\\Software\\Classes\\kunang.md'
   regAdd(appKey, '', 'Markdown Document')
   regAdd(`${appKey}\\shell\\open\\command`, '', `"${stubPath}" "%1"`)
-  regAdd(`${appKey}\\DefaultIcon`, '', `"${stubPath}",0`)
+
+  // Point at the icon file directly rather than at an executable's resource
+  // index. The registered handler is the Go stub, which carries no icon
+  // resource at all, so ",0" on it left every .md file showing Explorer's
+  // generic blank page.
+  regAdd(`${appKey}\\DefaultIcon`, '', getInstalledDocIconPath())
 
   notifyShell(stubPath)
 }
@@ -152,7 +157,7 @@ export function uninstall() {
   unregisterShell()
 
   // Drop the provisioning markers so a later portable run re-registers cleanly.
-  for (const name of ['registered', 'host', 'kunangstub.exe']) {
+  for (const name of ['registered', 'host', 'kunangstub.exe', 'kunang-md-notepad.ico']) {
     const p = join(PIPE_DIR, name)
     try {
       if (existsSync(p)) unlinkSync(p)

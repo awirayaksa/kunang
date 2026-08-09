@@ -55,20 +55,23 @@ pipe handshake. Measured on the development machine:
 
 | Hop | p50 | p95 |
 |---|---|---|
-| stub entry → pipe read | 12.0ms | 14.0ms |
+| stub entry → pipe read | 13.6ms | 16.7ms |
 | → dispatched to renderer | +0.0ms | |
-| → renderer painted | +15.5ms | |
-| → window shown | +15.2ms | |
-| **total** | **42.8ms** | **47.7ms** |
+| → renderer painted | +15.4ms | |
+| → window shown | +17.5ms | |
+| **total** | **47.0ms** | **57.3ms** |
 
 Cold, with no host running, bringing the host up takes ~960ms; the first open after
 that is 59.6ms. `npm run bench -- --cold` measures that path.
+
+Numbers move a few milliseconds between runs depending on machine load — treat the
+gate, not the exact figure, as the contract.
 
 ## Install
 
 ### Portable — single file, recommended
 
-Download `kunang-portable-<version>.exe` (~145MB) and run it. On first run it:
+Download `kunang-portable-<version>.exe` (~144MB) and run it. On first run it:
 
 1. Unpacks itself to `%LOCALAPPDATA%\kunang\app\<version>\` (~4s)
 2. Starts the resident host
@@ -220,6 +223,35 @@ entire lifetime, and lets a second launch delete the app out from under a runnin
 All three are fatal to a resident host, and `PortableOptions` exposes no script
 override. `scripts/build-portable.mjs` replaces it: the single file is the Go stub with
 the app zip embedded, so the same binary is both the bootstrapper and the handler.
+
+## Brand
+
+A firefly's flight path traces an `M`. Full guide in
+[`resources/BRAND.md`](resources/BRAND.md) — palette, lockups, clear space and the
+things not to do.
+
+Two hues only, night and amber. The one place amber moves is the editor caret, and
+that restraint is deliberate. `view.css` defines the palette as tokens
+(`--night-900`, `--amber-400`, `--glow`, `--paper`) and everything else derives from
+them, so nothing in the UI introduces a third brand colour.
+
+| Asset | Use |
+|---|---|
+| `resources/kunang.ico` | Application: taskbar, Alt-Tab, installer, window |
+| `resources/kunang-md-notepad.ico` | `.md` documents in Explorer |
+
+The two are kept distinct on purpose — the same split Windows uses for Word and
+`.docx`. The document icon is copied to `%LOCALAPPDATA%\kunang\` and registered as
+`DefaultIcon` from there, since a path under `app\<version>\` would break on upgrade.
+
+`npm run gen:icons` regenerates `kunang.ico` from the brand SVG. It rasterises under
+Electron rather than pulling in an image library, so the icon is rendered by the same
+engine that draws the app.
+
+> The app icon is currently derived from `kunang-md-tile.svg`. The brand guide calls
+> for a distinct application mark (`kunang-mark.svg`, the firefly trail without the
+> document sheet), which is not yet in `resources/`. Drop it in and point
+> `gen-icons.mjs` at it to swap.
 
 ## Layout
 

@@ -25,12 +25,47 @@ export function initEditor(): EditorView {
             onContentChange()
           }
         }),
-        EditorView.theme({
-          '&': { height: '100%' },
-          '.cm-scroller': { overflow: 'auto' },
-          '.cm-content': { fontFamily: "'Cascadia Mono', 'Consolas', 'Courier New', monospace", fontSize: '14px', padding: '16px' },
-          '.cm-gutters': { display: 'none' },
-        }),
+        // Brand palette — see resources/BRAND.md. The source pane is night
+        // with paper text, and the caret is amber-400: it is the one moving
+        // amber element in the interface, and that restraint is the point.
+        EditorView.theme(
+          {
+            '&': { height: '100%', backgroundColor: '#070B16', color: '#F6F4EF' },
+            '.cm-scroller': { overflow: 'auto' },
+            '.cm-content': {
+              fontFamily: "'Cascadia Mono', 'Consolas', 'Courier New', monospace",
+              fontSize: '14px',
+              padding: '16px',
+              // Fallback only: CodeMirror sets caret-color: transparent and
+              // draws .cm-cursor itself, so the rule below is the one that
+              // actually colours the caret.
+              caretColor: '#FFC247',
+            },
+            '.cm-cursor, .cm-dropCursor': {
+              borderLeftColor: '#FFC247',
+              borderLeftWidth: '2px',
+            },
+            '&.cm-focused': { outline: 'none' },
+            '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
+              backgroundColor: '#1B2542',
+            },
+            '.cm-activeLine': { backgroundColor: 'rgba(255, 233, 168, 0.05)' },
+            '.cm-gutters': { display: 'none' },
+            // The search panel ships with light-theme defaults that would sit
+            // as a white slab on the night pane.
+            '.cm-panels': { backgroundColor: '#0E1426', color: '#F6F4EF' },
+            '.cm-panels input, .cm-panels button': {
+              backgroundColor: '#070B16',
+              color: '#F6F4EF',
+              border: '1px solid #1B2542',
+              borderRadius: '4px',
+              padding: '2px 6px',
+            },
+            '.cm-searchMatch': { backgroundColor: 'rgba(255, 233, 168, 0.35)' },
+            '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: '#FFC247', color: '#070B16' },
+          },
+          { dark: true },
+        ),
       ],
     }),
     parent: container,

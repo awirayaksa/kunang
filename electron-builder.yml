@@ -4,35 +4,55 @@ directories:
   buildResources: resources
   output: dist
 files:
+  # No node_modules glob. electron-builder packs the production dependency
+  # tree on its own, and only main and preload need one — the renderer is
+  # bundled, so shipping its packages again would have added ~35MB of katex
+  # and mermaid source that nothing loads at runtime.
   - out/**/*
-  - node_modules/**/*
 extraResources:
   - from: stub/kunangstub.exe
     to: stub/kunangstub.exe
+  # Icons are needed at runtime, not just at build time: the host registers the
+  # document icon as DefaultIcon and sets the window icon from disk.
+  - from: resources/kunang.ico
+    to: icons/kunang.ico
+  - from: resources/kunang-md-notepad.ico
+    to: icons/kunang-md-notepad.ico
 win:
+  icon: resources/kunang.ico
   # No `portable` target: its NSIS template re-extracts the whole app on every
   # launch and ExecWaits on it, which the resident-host design cannot survive.
   # The single-file portable build is scripts/build-portable.mjs instead.
   target:
     - target: nsis
       arch: [x64]
+  # The document icon is deliberately distinct from the application icon — the
+  # same split Windows uses for Word and .docx.
   fileAssociations:
     - ext: md
       name: Markdown
       description: Markdown Document
+      icon: resources/kunang-md-notepad.ico
     - ext: markdown
       name: Markdown
       description: Markdown Document
+      icon: resources/kunang-md-notepad.ico
     - ext: mdown
       name: Markdown
       description: Markdown Document
+      icon: resources/kunang-md-notepad.ico
     - ext: mkd
       name: Markdown
       description: Markdown Document
+      icon: resources/kunang-md-notepad.ico
     - ext: mdx
       name: Markdown
       description: Markdown Document
+      icon: resources/kunang-md-notepad.ico
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  installerIcon: resources/kunang.ico
+  uninstallerIcon: resources/kunang.ico
+  installerHeaderIcon: resources/kunang.ico

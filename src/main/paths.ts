@@ -8,6 +8,53 @@ export function getDataDir(): string {
   return join(local, 'kunang')
 }
 
+/**
+ * Locate a brand icon in both a packaged app and a dev run.
+ *
+ * Packaged, icons ship as extraResources under resourcesPath/icons. In dev,
+ * __dirname is out/main, so the repo's resources/ sits two levels up. Deriving
+ * it this way avoids importing electron here, keeping this module cheap.
+ */
+function iconSource(name: string): string {
+  const resourcesPath = (process as any).resourcesPath
+  if (resourcesPath) {
+    const packaged = join(resourcesPath, 'icons', name)
+    if (existsSync(packaged)) return packaged
+  }
+  return join(__dirname, '..', '..', 'resources', name)
+}
+
+/** Application icon — taskbar, Alt-Tab, window. */
+export function getAppIconPath(): string {
+  return iconSource('kunang.ico')
+}
+
+/**
+ * The .md document icon, at a version-independent path.
+ *
+ * Registered as DefaultIcon, so like the stub it cannot live under
+ * app\<version>\ — every upgrade would leave Explorer pointing at a path that
+ * no longer exists, and .md files would silently lose their icon.
+ */
+export function getInstalledDocIconPath(): string {
+  const dir = getDataDir()
+  const installed = join(dir, 'kunang-md-notepad.ico')
+  const source = iconSource('kunang-md-notepad.ico')
+
+  try {
+    if (!existsSync(installed)) {
+      if (!existsSync(source)) return source
+      mkdirSync(dir, { recursive: true })
+      copyFileSync(source, installed)
+    }
+  } catch {
+    // Fall back to the source path; a read-only data dir is not fatal here.
+    return source
+  }
+
+  return installed
+}
+
 /** Optional user stylesheet, appended to the document's own styles. */
 export function getCustomCssPath(): string {
   return join(getDataDir(), 'custom.css')

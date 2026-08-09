@@ -9,3 +9,8 @@
 # Git must never rewrite it — core.autocrlf would strip crlf.md's CRLF on
 # commit and CRLF-ify the LF fixtures on clone.
 tests/corpus/** -text
+
+# Brand assets are binary. autocrlf mangling an .ico is silent — it still has
+# a plausible size and only fails when Explorer tries to draw it.
+*.ico binary
+*.png binary

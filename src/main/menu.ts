@@ -1,4 +1,17 @@
-import { Menu, app, dialog, BrowserWindow } from 'electron'
+import { Menu, app, dialog, BrowserWindow, nativeImage } from 'electron'
+import { getAppIconPath } from './paths'
+
+/** The mark, sized for a dialog. Undefined rather than a broken image if the
+ *  icon is missing, since a dialog is not worth failing over. */
+function getBrandIcon() {
+  try {
+    const image = nativeImage.createFromPath(getAppIconPath())
+    if (image.isEmpty()) return undefined
+    return image.resize({ width: 64, height: 64, quality: 'best' })
+  } catch {
+    return undefined
+  }
+}
 
 // Electron hands menu click handlers a BaseWindow, which has no webContents.
 // Narrowing is the honest fix; casting would hide a real null case.
@@ -127,11 +140,20 @@ export function buildMenu() {
         {
           label: 'About kunang',
           click: () => {
+            // Lowercase throughout: BRAND.md is explicit that the name is
+            // never capitalised.
             dialog.showMessageBox({
-              type: 'info',
+              type: 'none',
+              icon: getBrandIcon(),
               title: 'About kunang',
-              message: 'kunang — Notepad-fast Markdown viewer for Windows',
-              detail: `Version ${app.getVersion()}\n\nDouble-click .md → view instantly\nCtrl+E → edit (source + live preview)`,
+              message: 'kunang',
+              detail:
+                `Notepad-fast Markdown viewer and editor for Windows\n\n` +
+                `Version ${app.getVersion()}\n\n` +
+                `Double-click .md → view instantly\n` +
+                `Ctrl+E → edit (source + live preview)`,
+              buttons: ['Close'],
+              noLink: true,
             })
           },
         },

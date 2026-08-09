@@ -1,9 +1,10 @@
-﻿import { BrowserWindow } from 'electron'
+﻿import { BrowserWindow, nativeImage } from 'electron'
 import { join } from 'path'
 import { getThemeBackground } from './theme'
 import { benchStamp } from './bench'
 import { getState, markDirty } from './state'
 import { attachCloseGuard } from './close-guard'
+import { getAppIconPath } from './paths'
 
 const windows = new Map<number, BrowserWindow>()
 let spare: BrowserWindow | null = null
@@ -26,6 +27,24 @@ try {
   lastBounds = getState().bounds
 } catch {}
 
+// Decoded once. Passing a path here instead makes Electron re-read and decode
+// the 7-layer .ico for every window it constructs — including the spare that
+// is rebuilt while the window just handed out is still being shown, which put
+// the cost squarely on the path being measured.
+let appIcon: Electron.NativeImage | undefined
+
+function getCachedAppIcon(): Electron.NativeImage | undefined {
+  if (appIcon === undefined) {
+    try {
+      const image = nativeImage.createFromPath(getAppIconPath())
+      appIcon = image.isEmpty() ? nativeImage.createEmpty() : image
+    } catch {
+      appIcon = nativeImage.createEmpty()
+    }
+  }
+  return appIcon.isEmpty() ? undefined : appIcon
+}
+
 function createBrowserWindow(): BrowserWindow {
   const bg = getThemeBackground()
 
@@ -36,6 +55,9 @@ function createBrowserWindow(): BrowserWindow {
     minHeight: 300,
     show: false,
     backgroundColor: bg,
+    // Packaged, Windows takes the icon from the exe. This is what makes a dev
+    // run and the portable host show the brand mark rather than Electron's.
+    icon: getCachedAppIcon(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
