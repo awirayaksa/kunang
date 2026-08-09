@@ -1,5 +1,6 @@
-﻿interface KunangAPI {
+interface KunangAPI {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => void
+  onRestoreTabs: (callback: (payload: { paths: string[] }) => void) => void
   onFileChanged: (callback: (payload: { path: string }) => void) => void
   onFileRemoved: (callback: (payload: { path: string }) => void) => void
   onFileRenamed: (callback: (payload: { from: string; to: string }) => void) => void
@@ -16,7 +17,9 @@
   setScroll: (filePath: string, y: number) => void
   getCustomCss: () => Promise<string | null>
   getPathForFile: (file: File) => string
-  setDirty: (dirty: boolean, fileName: string) => void
+  setDirty: (count: number, fileName: string) => void
+  tabsChanged: (paths: string[]) => void
+  confirmCloseTab: (fileName: string) => Promise<number>
   onRequestSave: (callback: () => void) => void
   saveResult: (ok: boolean) => void
   allowRemote: () => void
@@ -37,24 +40,44 @@ import {
   onEditorChange,
   insertAtCursor,
   setEditorTheme,
+  getEditorView,
+  getEditorState as getLiveEditorState,
+  swapEditorState,
+  makeState,
 } from './editor'
 import { toRelativePath, basename } from './relpath'
-import { updatePreview } from './preview'
+import { updatePreview, resetPreview } from './preview'
 import { initSync } from './sync'
 import { exportHTML } from './export'
 import { initFind, openFind, closeFind, isFindOpen, refreshFind } from './find'
 import { enhance } from './lazy-render'
+import { TabData } from './tab-model'
+import {
+  initTabs,
+  addTab,
+  activeTab,
+  allTabs,
+  tabCount,
+  tabById,
+  tabForPath,
+  setActiveTab,
+  removeTab,
+  neighbourTab,
+  getEditorState,
+  setEditorState,
+  clearEditorState,
+  openPaths,
+  dirtyTabs,
+  renderStrip,
+} from './tabs'
 
 const viewMode = document.getElementById('view-mode')!
 const editMode = document.getElementById('edit-mode')!
 const viewContent = document.getElementById('view-content')!
 const statusText = document.getElementById('status-text')!
 
-let currentFile: string | null = null
-let currentContent = ''
-let dirty = false
-let fileMissing = false
-let isEditMode = false
+// Per window, not per document: zoom and theme are properties of the frame the
+// documents are being read in.
 let zoomLevel = 1
 let themeMode: 'auto' | 'light' | 'dark' = 'auto'
 
@@ -67,36 +90,66 @@ function clearStatusTimer() {
   }
 }
 
+function tabName(tab: TabData): string {
+  return tab.path ? basename(tab.path) : 'Untitled'
+}
+
+function escapeHtml(text: string): string {
+  const el = document.createElement('div')
+  el.textContent = text
+  return el.innerHTML
+}
+
 // The status bar shows the open file at rest. Transient messages replace it
 // briefly and then it settles back, so a stray "Saved" never masks the path.
 function updateStatus() {
   clearStatusTimer()
   updateTitle()
 
-  if (!currentFile) {
+  const tab = activeTab()
+  if (!tab || !tab.path) {
     statusText.textContent = 'Ready'
     return
   }
 
-  // A deleted file is a persistent condition, not a transient message â€” it
+  // A deleted file is a persistent condition, not a transient message — it
   // has to survive the flash timer settling back.
-  const suffix = fileMissing ? ' â€” file no longer exists on disk' : ''
-  statusText.textContent = `${dirty ? 'â— ' : ''}${currentFile}${suffix}`
+  const suffix = tab.fileMissing ? ' — file no longer exists on disk' : ''
+  statusText.textContent = `${tab.dirty ? '● ' : ''}${tab.path}${suffix}`
 }
 
 function updateTitle() {
-  const name = currentFile ? currentFile.split(/[\\/]/).pop() : null
+  const tab = activeTab()
   // The bullet is the conventional unsaved marker and is the only dirty cue
   // visible when the window is not focused.
-  document.title = name ? `${dirty ? 'â— ' : ''}${name}` : 'kunang'
+  document.title = tab ? `${tab.dirty ? '● ' : ''}${tabName(tab)}` : 'kunang'
+}
+
+/** Tell the main process how much is unsaved. It owns the close prompt, and
+ *  with tabs that prompt has to speak for every document in the window. */
+function pushDirtyState() {
+  const unsaved = dirtyTabs()
+  window.kunang.setDirty(unsaved.length, unsaved.length > 0 ? tabName(unsaved[0]) : '')
+}
+
+/** The open paths, so the main process can persist the session and stop
+ *  watching files no window has open any more. */
+function pushTabs() {
+  window.kunang.tabsChanged(openPaths())
+}
+
+function markDirty(tab: TabData, value: boolean) {
+  if (tab.dirty === value) return
+  tab.dirty = value
+
+  renderStrip()
+  if (tab === activeTab()) updateStatus()
+  pushDirtyState()
 }
 
 function setDirty(value: boolean) {
-  if (dirty === value) return
-  dirty = value
-  updateStatus()
-  // The main process owns the close prompt, so it needs to know.
-  window.kunang.setDirty(dirty, currentFile ? currentFile.split(/[\\/]/).pop() || '' : '')
+  const tab = activeTab()
+  if (tab) markDirty(tab, value)
 }
 
 function setStatus(text: string) {
@@ -112,22 +165,28 @@ function flashStatus(text: string) {
 function showView(text?: string) {
   viewMode.classList.add('active')
   editMode.classList.remove('active')
-  isEditMode = false
+
+  const tab = activeTab()
+  if (tab) tab.isEditMode = false
+
   if (text !== undefined) {
     renderView(text)
   }
 }
 
-/** Replace the view's content. Any open find has to re-run afterwards: its
- *  Ranges point at nodes that no longer exist. */
 function isDarkTheme(): boolean {
   if (themeMode === 'dark') return true
   if (themeMode === 'light') return false
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
+/** Replace the view's content. Any open find has to re-run afterwards: its
+ *  Ranges point at nodes that no longer exist. */
 function renderView(html: string) {
   viewContent.innerHTML = html
+
+  const tab = activeTab()
+  if (tab) tab.viewHTML = html
 
   // Math and diagrams resolve asynchronously, after the pane is already
   // painted — the fast path must not wait on a lazy import.
@@ -146,34 +205,43 @@ function renderView(html: string) {
 function showEdit() {
   viewMode.classList.remove('active')
   editMode.classList.add('active')
-  isEditMode = true
 
-  initEditor(isDarkTheme())
+  const tab = activeTab()
+  if (tab) tab.isEditMode = true
 
-  if (currentContent) {
-    setEditorContent(currentContent)
+  // One EditorView for the life of the window; each tab supplies its own
+  // state. Rebuilding it per tab would throw away undo history and pay
+  // CodeMirror's construction cost on every switch.
+  if (!getEditorView()) {
+    initEditor(isDarkTheme())
+    onEditorChange(() => {
+      setDirty(true)
+      updateEditPreview()
+    })
   }
 
-  onEditorChange(() => {
-    setDirty(true)
-    updateEditPreview()
-  })
+  if (tab) {
+    swapEditorState(getEditorState(tab.id) ?? makeState(tab.content, isDarkTheme()))
+    // A state stowed before the last theme change still carries the old
+    // configuration, and reconfiguring is cheaper than tracking which do.
+    setEditorTheme(isDarkTheme())
+  }
 
   initSync()
   updateEditPreview()
 }
 
 function updateEditPreview() {
-  const content = getEditorContent()
-  updatePreview(content)
+  updatePreview(getEditorContent())
 }
 
-// Where the view was scrolled to before entering edit mode, so Esc comes back
-// to the same place instead of jumping to the top.
-let viewScrollTop = 0
-
 function enterEdit() {
-  viewScrollTop = viewMode.scrollTop
+  const tab = activeTab()
+  if (!tab) return
+
+  // Where the view was scrolled to, so Esc comes back to the same place
+  // instead of jumping to the top.
+  tab.viewScrollTop = viewMode.scrollTop
   // The find bar searches the view pane, which is about to be hidden.
   closeFind()
   showEdit()
@@ -181,75 +249,228 @@ function enterEdit() {
 }
 
 function enterView() {
-  currentContent = getEditorContent()
-  showView(initRenderer(currentContent, currentFile || ''))
+  const tab = activeTab()
+  if (!tab) return
+
+  tab.content = getEditorContent()
+  setEditorState(tab.id, getLiveEditorState()!)
+  showView(initRenderer(tab.content, tab.path || ''))
 
   // Replacing innerHTML resets scrollTop, so restore on the next frame once
   // the new content has been laid out. Approximate by nature: the document
   // may have been edited, and the old offset no longer means quite the same
   // place.
   requestAnimationFrame(() => {
-    viewMode.scrollTop = viewScrollTop
+    viewMode.scrollTop = tab.viewScrollTop
   })
 }
 
 function toggleEditMode() {
-  if (isEditMode) {
+  if (activeTab()?.isEditMode) {
     enterView()
   } else {
     enterEdit()
   }
 }
 
-async function loadFile(filePath: string) {
+// --- Tabs ---------------------------------------------------------------
+// Opens are serialised through a queue. Each one is several awaits long, and a
+// second file arriving mid-flight — a double-click while the first is still
+// loading — would otherwise interleave two activations and leave the pane
+// showing one document while the strip claims another.
+
+let queue: Promise<void> = Promise.resolve()
+
+function enqueue(op: () => Promise<void>) {
+  queue = queue.then(op).catch((err) => console.error('tab operation failed', err))
+}
+
+/** Read a tab's file into it. Touches no DOM, so it is safe to run for a tab
+ *  that is not on screen. */
+async function loadTabContent(tab: TabData): Promise<void> {
+  if (!tab.path) return
+
   try {
-    setStatus(`Loading ${filePath}...`)
-    const doc = await window.kunang.readFile(filePath)
-
-    // Consent was granted for the previous document, not this one.
-    if (filePath !== currentFile && remoteAllowed) {
-      remoteAllowed = false
-      window.kunang.revokeRemote()
-    }
-
-    currentFile = filePath
-    currentContent = doc.content
-    dirty = false
-    fileMissing = false
-
-    const rendered = initRenderer(doc.content, filePath)
-    showView(rendered)
-    updateStatus()
-
-    window.kunang.paintDone()
-
-    // After paint, so the restore lands on a laid-out document. Awaiting it
-    // before paintDone would put an IPC round-trip on the critical path.
-    void restoreScroll(filePath)
+    const doc = await window.kunang.readFile(tab.path)
+    tab.content = doc.content
+    tab.dirty = false
+    tab.fileMissing = false
+    tab.loaded = true
+    tab.viewHTML = initRenderer(doc.content, tab.path)
   } catch (err) {
-    setStatus(`Error loading file: ${err}`)
-    showView(`<p>Error loading file: ${err}</p>`)
+    tab.loaded = true
+    tab.viewHTML = `<p>Error loading file: ${escapeHtml(String(err))}</p>`
   }
 }
 
-/** Returns whether the document is now safely on disk — the close prompt
- *  depends on this to decide whether closing is safe. */
-async function save(): Promise<boolean> {
-  // An untitled buffer has nowhere to go without asking first.
-  if (!currentFile) return saveAs()
-  if (!dirty) return true
+/** Stow everything about the tab being left that lives in the DOM. */
+function deactivate(tab: TabData) {
+  if (tab.isEditMode) {
+    const state = getLiveEditorState()
+    if (state) setEditorState(tab.id, state)
+    tab.content = getEditorContent()
+  } else {
+    tab.viewScrollTop = viewMode.scrollTop
+    if (tab.path) window.kunang.setScroll(tab.path, viewMode.scrollTop)
+    // Keep the enhanced DOM — re-inserting this on the way back avoids
+    // re-running Mermaid for every diagram in the document.
+    tab.viewHTML = viewContent.innerHTML
+  }
 
-  const content = isEditMode ? getEditorContent() : currentContent
-  try {
-    await window.kunang.saveFile(currentFile, content)
-    currentContent = content
-    fileMissing = false
-    setDirty(false)
-    flashStatus('Saved')
+  closeFind()
+}
 
-    if (isEditMode) {
-      renderView(initRenderer(content, currentFile))
+/** Remote images are permitted per webContents, which every tab in this window
+ *  shares, so the grant has to follow whichever document is on screen. */
+function syncRemoteConsent(tab: TabData) {
+  if (tab.remoteAllowed) {
+    window.kunang.allowRemote()
+  } else {
+    window.kunang.revokeRemote()
+  }
+}
+
+async function activateTab(id: number): Promise<void> {
+  const incoming = tabById(id)
+  if (!incoming) return
+
+  const outgoing = activeTab()
+  if (outgoing && outgoing.id !== id) deactivate(outgoing)
+
+  // morphdom transforms whatever is already in the preview pane; without this
+  // it would diff one document against another.
+  resetPreview()
+
+  setActiveTab(id)
+  syncRemoteConsent(incoming)
+
+  // Restored tabs carry a path and nothing else until they are first looked at.
+  if (!incoming.loaded) {
+    setStatus(`Loading ${incoming.path}...`)
+    await loadTabContent(incoming)
+    if (activeTab()?.id !== id) return
+  }
+
+  if (incoming.isEditMode) {
+    showEdit()
+  } else {
+    if (incoming.viewHTML === null) {
+      incoming.viewHTML = initRenderer(incoming.content, incoming.path || '')
     }
+    showView(incoming.viewHTML)
+
+    const y = incoming.viewScrollTop
+    requestAnimationFrame(() => {
+      if (activeTab()?.id === id) viewMode.scrollTop = y
+    })
+  }
+
+  updateStatus()
+  renderStrip()
+  pushTabs()
+}
+
+/**
+ * Open a document as a tab, or bring its tab forward if it is already open.
+ *
+ * Every open path funnels through here: the pipe (a double-click in Explorer),
+ * Ctrl+O, a drop, and a link between documents.
+ */
+async function openInTab(filePath: string): Promise<void> {
+  const existing = tabForPath(filePath)
+  if (existing) {
+    await activateTab(existing.id)
+    return
+  }
+
+  setStatus(`Loading ${filePath}...`)
+
+  const tab = addTab(filePath)
+  await loadTabContent(tab)
+  await activateTab(tab.id)
+
+  pushDirtyState()
+  window.kunang.paintDone()
+
+  // After paint, so the restore lands on a laid-out document. Awaiting it
+  // before paintDone would put an IPC round-trip on the critical path.
+  void restoreScroll(tab)
+}
+
+async function closeTab(id: number): Promise<void> {
+  const tab = tabById(id)
+  if (!tab) return
+
+  if (tab.dirty) {
+    // Ask about the document the user can see. Prompting about a background
+    // tab gives them no way to check what they are about to lose.
+    if (tab !== activeTab()) await activateTab(id)
+
+    const choice = await window.kunang.confirmCloseTab(tabName(tab))
+    if (choice === 2) return
+    if (choice === 0 && !(await saveTab(tab))) return
+
+    // Don't Save: the buffer is being discarded, so stop reporting it as
+    // unsaved. Otherwise closing the last tab asks a second time, from the
+    // window close guard, about a document the user already gave up on.
+    markDirty(tab, false)
+  }
+
+  // The last tab going means the window goes. The close guard in the main
+  // process still runs, and by now nothing is dirty.
+  if (tabCount() === 1) {
+    window.close()
+    return
+  }
+
+  const wasActive = tab === activeTab()
+  if (wasActive) deactivate(tab)
+
+  clearEditorState(tab.id)
+  const next = removeTab(id)
+
+  renderStrip()
+  pushDirtyState()
+  pushTabs()
+
+  if (wasActive && next) {
+    // removeTab has already picked the successor; render it.
+    await activateTab(next.id)
+  }
+}
+
+function stepTab(delta: number) {
+  // Resolved inside the queue, not at the keypress: holding Ctrl+Tab enqueues
+  // faster than activations complete, and computing the neighbour up front
+  // would make every one of them step from the same starting tab.
+  enqueue(async () => {
+    const next = neighbourTab(delta)
+    if (next) await activateTab(next.id)
+  })
+}
+
+// --- Save ---------------------------------------------------------------
+
+/** Returns whether the document is now safely on disk — the close prompts
+ *  depend on this to decide whether closing is safe. */
+async function saveTab(tab: TabData): Promise<boolean> {
+  // An untitled buffer has nowhere to go without asking first, and the dialog
+  // is modal to the window, so only the visible document may raise one.
+  if (!tab.path) return tab === activeTab() ? saveAs() : false
+  if (!tab.dirty) return true
+
+  const live = tab === activeTab() && tab.isEditMode
+  const content = live ? getEditorContent() : tab.content
+
+  try {
+    await window.kunang.saveFile(tab.path, content)
+    tab.content = content
+    tab.fileMissing = false
+    tab.viewHTML = initRenderer(content, tab.path)
+    markDirty(tab, false)
+
+    // Keep the view pane current so Esc out of edit mode shows what was saved.
+    if (live) renderView(tab.viewHTML)
     return true
   } catch (err) {
     setStatus(`Save failed: ${err}`)
@@ -257,26 +478,54 @@ async function save(): Promise<boolean> {
   }
 }
 
+async function save(): Promise<boolean> {
+  const tab = activeTab()
+  if (!tab) return true
+
+  const ok = await saveTab(tab)
+  if (ok && tab.path) flashStatus('Saved')
+  return ok
+}
+
+/** Every dirty document in the window, for the close guard. Stops at the first
+ *  failure rather than closing over content that never reached disk. */
+async function saveAllDirty(): Promise<boolean> {
+  for (const tab of dirtyTabs()) {
+    if (!(await saveTab(tab))) return false
+  }
+  return true
+}
+
 async function saveAs(): Promise<boolean> {
-  const content = isEditMode ? getEditorContent() : currentContent
+  const tab = activeTab()
+  if (!tab) return false
+
+  const content = tab.isEditMode ? getEditorContent() : tab.content
   const path = await window.kunang.saveFileAs(content)
 
   // Cancelled — nothing was written, and the caller must not treat that as
   // safe to close over.
   if (!path) return false
 
-  currentFile = path
-  currentContent = content
-  fileMissing = false
-  setDirty(false)
+  tab.path = path
+  tab.content = content
+  tab.fileMissing = false
+  tab.viewHTML = initRenderer(content, path)
+  markDirty(tab, false)
+
   updateStatus()
+  renderStrip()
+  pushTabs()
   flashStatus('Saved')
   return true
 }
 
 async function doExport() {
-  const content = isEditMode ? getEditorContent() : currentContent
-  const title = document.title.replace(/\.(md|markdown|mdown|mkd|mdx)$/i, '')
+  const tab = activeTab()
+  if (!tab) return
+
+  const content = tab.isEditMode ? getEditorContent() : tab.content
+  const title = tabName(tab).replace(/\.(md|markdown|mdown|mkd|mdx)$/i, '')
   const html = exportHTML(content, title)
 
   const blob = new Blob([html], { type: 'text/html' })
@@ -329,27 +578,38 @@ function toggleOutline() {
 let scrollSaveTimer: ReturnType<typeof setTimeout> | null = null
 
 function saveScrollSoon() {
-  if (!currentFile || isEditMode) return
+  const tab = activeTab()
+  if (!tab?.path || tab.isEditMode) return
+
   if (scrollSaveTimer) clearTimeout(scrollSaveTimer)
   // Scroll fires per frame; persisting each one would hammer state.json.
   scrollSaveTimer = setTimeout(() => {
     scrollSaveTimer = null
-    if (currentFile) window.kunang.setScroll(currentFile, viewMode.scrollTop)
+    const current = activeTab()
+    if (current?.path) {
+      current.viewScrollTop = viewMode.scrollTop
+      window.kunang.setScroll(current.path, viewMode.scrollTop)
+    }
   }, 250)
 }
 
-async function restoreScroll(filePath: string) {
-  const y = await window.kunang.getScroll(filePath)
+async function restoreScroll(tab: TabData) {
+  if (!tab.path) return
+
+  const y = await window.kunang.getScroll(tab.path)
   if (!y) return
-  // Only restore if this is still the document on screen â€” the user may have
+
+  tab.viewScrollTop = y
+  // Only restore if this is still the document on screen — the user may have
   // opened another file while the IPC call was in flight.
-  if (currentFile !== filePath) return
+  if (activeTab()?.id !== tab.id) return
 
   // Wait for layout: images and highlighted code can still be resizing, and
   // scrollTop is clamped to the height known at the time it is assigned.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if (currentFile === filePath) viewMode.scrollTop = y
+      const current = activeTab()
+      if (current?.id === tab.id && !current.isEditMode) viewMode.scrollTop = y
     })
   })
 }
@@ -358,8 +618,9 @@ viewMode.addEventListener('scroll', saveScrollSoon)
 
 window.addEventListener('pagehide', () => {
   // Debounced saves would otherwise be lost when the window closes.
-  if (currentFile && !isEditMode) {
-    window.kunang.setScroll(currentFile, viewMode.scrollTop)
+  const tab = activeTab()
+  if (tab?.path && !tab.isEditMode) {
+    window.kunang.setScroll(tab.path, viewMode.scrollTop)
   }
 })
 
@@ -377,7 +638,8 @@ function setZoom(level: number) {
 }
 
 async function reloadFile() {
-  if (!currentFile) return
+  const tab = activeTab()
+  if (!tab?.path) return
 
   // F5 is also the way to pick up an edited custom.css without restarting the
   // resident host.
@@ -386,16 +648,16 @@ async function reloadFile() {
   try {
     // force: the main process caches open documents, and a reload that
     // returned the cache would defeat the entire point of F5.
-    const doc = await window.kunang.readFile(currentFile, true)
-    currentContent = doc.content
-    fileMissing = false
-    setDirty(false)
+    const doc = await window.kunang.readFile(tab.path, true)
+    tab.content = doc.content
+    tab.fileMissing = false
+    markDirty(tab, false)
 
-    if (isEditMode) {
+    if (tab.isEditMode) {
       setEditorContent(doc.content)
       updateEditPreview()
     } else {
-      renderView(initRenderer(doc.content, currentFile))
+      renderView(initRenderer(doc.content, tab.path))
     }
 
     flashStatus('Reloaded from disk')
@@ -407,9 +669,10 @@ async function reloadFile() {
 function doPrint() {
   // Print CSS forces view mode visible, so make sure it holds the current
   // buffer before printing out of edit mode.
-  if (isEditMode) {
-    currentContent = getEditorContent()
-    renderView(initRenderer(currentContent, currentFile || ''))
+  const tab = activeTab()
+  if (tab?.isEditMode) {
+    tab.content = getEditorContent()
+    renderView(initRenderer(tab.content, tab.path || ''))
   }
   window.print()
 }
@@ -429,9 +692,16 @@ function applyTheme() {
   setEditorTheme(isDarkTheme())
 
   // Mermaid bakes its palette into the SVG at render time, so an already-drawn
-  // diagram keeps the old theme until the document is rendered again.
-  if (!isEditMode && currentFile && viewContent.querySelector('.mermaid-block')) {
-    renderView(initRenderer(currentContent, currentFile))
+  // diagram keeps the old theme until the document is rendered again. The
+  // visible one is redrawn now; the rest are marked stale so they are redrawn
+  // when they are next looked at.
+  const active = activeTab()
+  for (const tab of allTabs()) {
+    if (tab !== active) tab.viewHTML = null
+  }
+
+  if (active && !active.isEditMode && viewContent.querySelector('.mermaid-block')) {
+    renderView(initRenderer(active.content, active.path || ''))
   }
 }
 
@@ -458,7 +728,7 @@ document.addEventListener('keydown', async (e) => {
 
   // Edit mode is left alone: CodeMirror's own search panel is already bound to
   // Ctrl+F and handles the event before it reaches this listener.
-  if (e.ctrlKey && e.key === 'f' && !isEditMode) {
+  if (e.ctrlKey && e.key === 'f' && !activeTab()?.isEditMode) {
     e.preventDefault()
     openFind()
   }
@@ -475,11 +745,13 @@ document.addEventListener('keydown', async (e) => {
 
   if (e.key === 'Escape') {
     // Esc backs out one level at a time: find bar, then edit mode, then the
-    // window itself.
+    // tab, then the window itself.
     if (isFindOpen()) {
       closeFind()
-    } else if (isEditMode) {
+    } else if (activeTab()?.isEditMode) {
       enterView()
+    } else if (tabCount() > 1) {
+      closeActive()
     } else {
       window.close()
     }
@@ -487,15 +759,20 @@ document.addEventListener('keydown', async (e) => {
 
   if (e.ctrlKey && e.key === 'w') {
     e.preventDefault()
-    window.close()
+    closeActive()
+  }
+
+  // A second route to the tab accelerators in the menu, for the Page keys
+  // Chromium does not reserve.
+  if (e.ctrlKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
+    e.preventDefault()
+    stepTab(e.key === 'PageDown' ? 1 : -1)
   }
 
   if (e.ctrlKey && e.key === 'o') {
     e.preventDefault()
     const path = await window.kunang.openFileDialog()
-    if (path) {
-      await loadFile(path)
-    }
+    if (path) enqueue(() => openInTab(path))
   }
 
   if (e.ctrlKey && (e.key === '=' || e.key === '+')) {
@@ -539,6 +816,11 @@ document.addEventListener('keydown', async (e) => {
   }
 })
 
+function closeActive() {
+  const tab = activeTab()
+  if (tab) enqueue(() => closeTab(tab.id))
+}
+
 // --- Drag and drop -----------------------------------------------------
 // Both handlers must preventDefault, or Electron navigates the window to the
 // dropped file — and protocol.ts's will-navigate guard would then hand it to
@@ -566,9 +848,10 @@ document.addEventListener(
     const paths = files.map((f) => window.kunang.getPathForFile(f)).filter((p) => p.length > 0)
     if (paths.length === 0) return
 
-    const markdown = paths.find((p) => MARKDOWN_RE.test(p))
-    if (markdown) {
-      void loadFile(markdown)
+    // Every dropped document gets a tab; the last one dropped ends up in front.
+    const markdown = paths.filter((p) => MARKDOWN_RE.test(p))
+    if (markdown.length > 0) {
+      for (const path of markdown) enqueue(() => openInTab(path))
       return
     }
 
@@ -578,7 +861,8 @@ document.addEventListener(
       return
     }
 
-    if (!isEditMode) {
+    const tab = activeTab()
+    if (!tab?.isEditMode) {
       flashStatus('Drop images in edit mode to insert them')
       return
     }
@@ -586,7 +870,7 @@ document.addEventListener(
     // Relative to the document, so the link keeps working if the folder moves.
     // With no open file there is nothing to be relative to, so use the
     // absolute path.
-    const docDir = currentFile ? currentFile.replace(/[/\\][^/\\]*$/, '') : ''
+    const docDir = tab.path ? tab.path.replace(/[/\\][^/\\]*$/, '') : ''
     const snippet = images
       .map((p) => `![${basename(p)}](${docDir ? toRelativePath(docDir, p) : p.replace(/\\/g, '/')})`)
       .join('\n')
@@ -597,6 +881,32 @@ document.addEventListener(
   true,
 )
 
+// --- Links between documents -------------------------------------------
+// A relative link to another .md resolves to mdfile://, which will-navigate
+// lets through — navigating the whole window to raw Markdown served as text.
+// Open it as a tab instead, which is what the link plainly means.
+
+function pathFromMdfileUrl(href: string): string | null {
+  try {
+    const url = new URL(href)
+    if (url.protocol !== 'mdfile:') return null
+    return decodeURIComponent(url.pathname.replace(/^\//, ''))
+  } catch {
+    return null
+  }
+}
+
+viewContent.addEventListener('click', (e) => {
+  const anchor = (e.target as Element | null)?.closest('a[href]')
+  if (!anchor) return
+
+  const path = pathFromMdfileUrl(anchor.getAttribute('href') || '')
+  if (!path || !MARKDOWN_RE.test(path)) return
+
+  e.preventDefault()
+  enqueue(() => openInTab(path.replace(/\//g, '\\')))
+})
+
 // --- Remote content consent --------------------------------------------
 // Remote images are blocked in the main process by default: a markdown file is
 // untrusted input, and one <img> pointing at a remote host is enough to report
@@ -605,14 +915,13 @@ document.addEventListener(
 const consentBar = document.getElementById('consent-bar')!
 const consentText = document.getElementById('consent-text')!
 
-let remoteAllowed = false
-
 function countRemoteImages(): number {
   return viewContent.querySelectorAll('img[src^="http"]').length
 }
 
 function updateConsentBar() {
-  if (remoteAllowed || isEditMode) {
+  const tab = activeTab()
+  if (!tab || tab.remoteAllowed || tab.isEditMode) {
     consentBar.hidden = true
     return
   }
@@ -631,15 +940,16 @@ function updateConsentBar() {
 }
 
 document.getElementById('consent-allow')!.addEventListener('click', () => {
-  remoteAllowed = true
+  const tab = activeTab()
+  if (!tab) return
+
+  tab.remoteAllowed = true
   consentBar.hidden = true
   window.kunang.allowRemote()
 
   // The blocked requests already failed, so re-render to reissue them now
   // that the main process will let them through.
-  if (currentFile) {
-    renderView(initRenderer(currentContent, currentFile))
-  }
+  renderView(initRenderer(tab.content, tab.path || ''))
 })
 
 document.getElementById('consent-dismiss')!.addEventListener('click', () => {
@@ -666,6 +976,11 @@ async function applyCustomCss() {
 
 void applyCustomCss()
 
+initTabs({
+  onActivate: (id) => enqueue(() => activateTab(id)),
+  onCloseRequest: (id) => enqueue(() => closeTab(id)),
+})
+
 initFind(viewMode, viewContent)
 
 // Adopt the persisted theme before the first paint of a reused spare window.
@@ -677,68 +992,101 @@ window.kunang.getTheme().then((mode) => {
 // IPC listeners
 window.kunang.onLoad((payload) => {
   if (payload.file) {
-    loadFile(payload.file)
+    enqueue(() => openInTab(payload.file!))
   }
 })
 
-window.kunang.onFileChanged(async ({ path: filePath }) => {
-  if (filePath !== currentFile) return
+// The previous session's documents, sent before the file that caused this
+// window to exist. Their tabs are created empty and read on first activation,
+// so restoring a large session costs nothing on the open path.
+window.kunang.onRestoreTabs(({ paths }) => {
+  enqueue(async () => {
+    for (const path of paths) {
+      if (!tabForPath(path)) addTab(path)
+    }
+    renderStrip()
+  })
+})
 
-  if (dirty) {
+window.kunang.onFileChanged(async ({ path: filePath }) => {
+  const tab = tabForPath(filePath)
+  if (!tab) return
+
+  if (tab.dirty) {
     // Never silently discard the user's edits. Tell them and let them choose.
-    setStatus('File changed on disk. F5 to reload, or save to overwrite.')
+    if (tab === activeTab()) {
+      setStatus('File changed on disk. F5 to reload, or save to overwrite.')
+    }
     return
   }
 
   try {
     // force: the cached copy is exactly the stale content we are reacting to.
     const doc = await window.kunang.readFile(filePath, true)
-    currentContent = doc.content
-    fileMissing = false
+    tab.content = doc.content
+    tab.fileMissing = false
+    tab.loaded = true
+    tab.viewHTML = null
+    // A stowed editor state holds the old text, and it takes precedence over
+    // tab.content when the tab is next shown.
+    if (tab !== activeTab()) clearEditorState(tab.id)
 
-    if (isEditMode) {
-      setEditorContent(doc.content)
-      updateEditPreview()
-    } else {
-      renderView(initRenderer(doc.content, filePath))
+    if (tab === activeTab()) {
+      if (tab.isEditMode) {
+        setEditorContent(doc.content)
+        updateEditPreview()
+      } else {
+        renderView(initRenderer(doc.content, filePath))
+      }
+      updateStatus()
     }
-    updateStatus()
   } catch {
     // Raced with a delete; the unlink event will report it.
   }
 })
 
 window.kunang.onFileRemoved(({ path: filePath }) => {
-  if (filePath !== currentFile) return
-  // Keep the buffer â€” it is now the only copy left, so discarding it would
+  const tab = tabForPath(filePath)
+  if (!tab) return
+
+  // Keep the buffer — it is now the only copy left, so discarding it would
   // destroy data. Saving recreates the file.
-  fileMissing = true
-  updateStatus()
+  tab.fileMissing = true
+  if (tab === activeTab()) updateStatus()
 })
 
 window.kunang.onFileRenamed(async ({ from, to }) => {
-  if (from !== currentFile) return
+  const tab = tabForPath(from)
+  if (!tab) return
 
-  currentFile = to
-  fileMissing = false
-  updateStatus()
+  tab.path = to
+  tab.fileMissing = false
+  renderStrip()
+  pushTabs()
+  if (tab === activeTab()) updateStatus()
 
-  if (!dirty) {
+  if (!tab.dirty) {
     try {
       const doc = await window.kunang.readFile(to, true)
-      currentContent = doc.content
-      if (isEditMode) {
-        setEditorContent(doc.content)
-        updateEditPreview()
-      } else {
-        renderView(initRenderer(doc.content, to))
+      tab.content = doc.content
+      tab.loaded = true
+      tab.viewHTML = null
+      if (tab !== activeTab()) clearEditorState(tab.id)
+
+      if (tab === activeTab()) {
+        if (tab.isEditMode) {
+          setEditorContent(doc.content)
+          updateEditPreview()
+        } else {
+          renderView(initRenderer(doc.content, to))
+        }
       }
     } catch {
-      fileMissing = true
+      tab.fileMissing = true
     }
   }
 
-  flashStatus(`Renamed to ${to.split(/[\\/]/).pop()}`)
+  if (tab === activeTab()) flashStatus(`Renamed to ${basename(to)}`)
 })
 
 // Menu action handler (triggered from native menu bar)
@@ -746,7 +1094,7 @@ window.kunang.onMenuAction(async (action) => {
   switch (action) {
     case 'open': {
       const path = await window.kunang.openFileDialog()
-      if (path) await loadFile(path)
+      if (path) enqueue(() => openInTab(path))
       break
     }
     case 'save':
@@ -754,6 +1102,15 @@ window.kunang.onMenuAction(async (action) => {
       break
     case 'save-as':
       await saveAs()
+      break
+    case 'close-tab':
+      closeActive()
+      break
+    case 'next-tab':
+      stepTab(1)
+      break
+    case 'prev-tab':
+      stepTab(-1)
       break
     case 'print':
       doPrint()
@@ -788,5 +1145,5 @@ window.kunang.onMenuAction(async (action) => {
 // The main process intercepts close and asks; a renderer cannot both ask a
 // question and act on the answer from beforeunload.
 window.kunang.onRequestSave(async () => {
-  window.kunang.saveResult(await save())
+  window.kunang.saveResult(await saveAllDirty())
 })

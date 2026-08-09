@@ -8,6 +8,7 @@ import './math-rules.test'
 import './relpath.test'
 import './roundtrip.test'
 import './state.test'
+import './tab-model.test'
 import './watcher.test'
 import { run } from './test-runner'
 

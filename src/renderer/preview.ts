@@ -13,6 +13,23 @@ function prefersDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
+/**
+ * Forget the previous render.
+ *
+ * Call when the preview is about to show a different document. morphdom
+ * transforms the DOM that is already there, so without this a tab switch
+ * morphs one document into another — producing a diff between two unrelated
+ * files, and preserving mermaid diagrams that belong to the tab being left.
+ */
+export function resetPreview() {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+    debounceTimer = null
+  }
+  lastRendered = ''
+  previewContent.textContent = ''
+}
+
 export function updatePreview(markdown: string) {
   if (debounceTimer) {
     clearTimeout(debounceTimer)

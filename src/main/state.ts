@@ -6,6 +6,11 @@ export interface AppState {
   idleTimeoutMinutes: number
   scrollPositions: Record<string, number>
   bounds: { x: number; y: number; width: number; height: number } | null
+  /** Documents that were open when the host last had windows, oldest first.
+   *  One flat list rather than a per-window layout: the host is resident and
+   *  windowless most of the time, so there is no moment at which restoring a
+   *  window arrangement would be the right thing to do. */
+  session: string[]
 }
 
 // Resolved lazily, and Electron is only required if LOCALAPPDATA is missing.
@@ -31,8 +36,32 @@ const MAX_SCROLL_ENTRIES = 200
 // each event used to cost a synchronous read plus a write.
 const FLUSH_DELAY_MS = 500
 
+// A session is capped for the same reason scroll positions are: a resident
+// host lives for weeks, and a restore that opened hundreds of tabs would be a
+// worse outcome than losing the tail of the list.
+const MAX_SESSION_PATHS = 50
+
 function defaults(): AppState {
-  return { theme: 'auto', idleTimeoutMinutes: 0, scrollPositions: {}, bounds: null }
+  return { theme: 'auto', idleTimeoutMinutes: 0, scrollPositions: {}, bounds: null, session: [] }
+}
+
+/**
+ * Keep only what is actually a list of paths.
+ *
+ * Exported for testing, and defensive on purpose: state.json is a plain file a
+ * user may edit, and a malformed session must degrade to "no tabs restored"
+ * rather than throwing on a path that turns out to be a number.
+ */
+export function sanitizeSession(value: unknown, max: number = MAX_SESSION_PATHS): string[] {
+  if (!Array.isArray(value)) return []
+
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry === 'string' && entry.length > 0) seen.add(entry)
+  }
+
+  // Keep the tail: those are the most recently open.
+  return Array.from(seen).slice(-max)
 }
 
 export function loadState(): AppState {
@@ -43,10 +72,16 @@ export function loadState(): AppState {
       idleTimeoutMinutes: parsed.idleTimeoutMinutes || 0,
       scrollPositions: parsed.scrollPositions || {},
       bounds: parsed.bounds || null,
+      session: sanitizeSession(parsed.session),
     }
   } catch {
     return defaults()
   }
+}
+
+export function setSession(paths: string[]) {
+  getState().session = sanitizeSession(paths)
+  markDirty()
 }
 
 export async function saveState(state: AppState): Promise<void> {

@@ -4,6 +4,9 @@ const api = {
   onLoad: (callback: (payload: { file: string | null; cwd: string; t0: number }) => void) => {
     ipcRenderer.on('load', (_event, payload) => callback(payload))
   },
+  onRestoreTabs: (callback: (payload: { paths: string[] }) => void) => {
+    ipcRenderer.on('restore-tabs', (_event, payload) => callback(payload))
+  },
   onFileChanged: (callback: (payload: { path: string }) => void) => {
     ipcRenderer.on('file-changed', (_event, payload) => callback(payload))
   },
@@ -43,8 +46,14 @@ const api = {
   setTheme: (mode: 'auto' | 'light' | 'dark') => {
     ipcRenderer.send('set-theme', mode)
   },
-  setDirty: (dirty: boolean, fileName: string) => {
-    ipcRenderer.send('set-dirty', dirty, fileName)
+  setDirty: (count: number, fileName: string) => {
+    ipcRenderer.send('set-dirty', count, fileName)
+  },
+  tabsChanged: (paths: string[]) => {
+    ipcRenderer.send('tabs-changed', paths)
+  },
+  confirmCloseTab: (fileName: string): Promise<number> => {
+    return ipcRenderer.invoke('confirm-close-tab', fileName)
   },
   onRequestSave: (callback: () => void) => {
     ipcRenderer.on('request-save', () => callback())

@@ -90,6 +90,32 @@ export function setEditorTheme(dark: boolean) {
   })
 }
 
+/**
+ * A fresh editor state for one document.
+ *
+ * Factored out of initEditor so every tab's state is built from the same
+ * extension list — swapping a state built with a different configuration into
+ * a live view silently drops whichever extensions the two do not share.
+ */
+export function makeState(doc: string, dark: boolean): EditorState {
+  return EditorState.create({
+    doc,
+    extensions: [
+      basicSetup,
+      markdown(),
+      keymap.of([indentWithTab]),
+      EditorView.lineWrapping,
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          onContentChange()
+        }
+      }),
+      BASE_THEME,
+      themeMode.of(themeExtensions(dark)),
+    ],
+  })
+}
+
 export function initEditor(dark: boolean): EditorView {
   const container = document.getElementById('editor-container')!
   if (editorView) {
@@ -97,26 +123,38 @@ export function initEditor(dark: boolean): EditorView {
   }
 
   editorView = new EditorView({
-    state: EditorState.create({
-      doc: '',
-      extensions: [
-        basicSetup,
-        markdown(),
-        keymap.of([indentWithTab]),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onContentChange()
-          }
-        }),
-        BASE_THEME,
-        themeMode.of(themeExtensions(dark)),
-      ],
-    }),
+    state: makeState('', dark),
     parent: container,
   })
 
   return editorView
+}
+
+/**
+ * Show another tab's document, keeping the live view.
+ *
+ * setState rather than a new EditorView: the state carries its own undo
+ * history and selection, so switching away and back leaves the cursor and
+ * Ctrl+Z exactly where the user left them. Rebuilding the view would discard
+ * both and re-run CodeMirror's whole construction cost per switch.
+ */
+export function swapEditorState(state: EditorState) {
+  if (!editorView) return
+
+  // setState fires the update listener for the document it installs. That is
+  // not a user edit, and treating it as one marks the incoming tab dirty the
+  // moment it is looked at.
+  applyingProgrammaticEdit = true
+  try {
+    editorView.setState(state)
+  } finally {
+    applyingProgrammaticEdit = false
+  }
+}
+
+/** The live state, to be stowed against the outgoing tab before a switch. */
+export function getEditorState(): EditorState | null {
+  return editorView?.state ?? null
 }
 
 let changeCallback: (() => void) | null = null

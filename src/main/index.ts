@@ -1,10 +1,11 @@
-﻿import { app } from 'electron'
+﻿import { app, BrowserWindow } from 'electron'
 import { existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { getDataDir, writeHostPointer } from './paths'
 import { start as startPipeServer } from './pipe'
-import { initWarmSpare, getSpareWindow, getWindows, hasSpareWindow } from './windows'
-import { initBench, beginOpen, markDispatch } from './bench'
+import { initWarmSpare, getSpareWindow, getTargetWindow, getWindows, hasSpareWindow } from './windows'
+import { initBench, beginOpen, markDispatch, isBenchEnabled } from './bench'
+import { takeRestorePaths } from './session'
 import { registerProtocol } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildMenu } from './menu'
@@ -13,6 +14,29 @@ import { initTheme } from './theme'
 import { closeAllWatchers, setWatchSink } from './watcher'
 
 app.setAppUserModelId('com.kunang.app')
+
+/**
+ * Which window serves the next open.
+ *
+ * Normally the one the user was last looking at, which gains a tab. Under
+ * --bench it is always a fresh window: paint-done closes each measured window
+ * (ipc.ts), so reusing one would make every sample after the first cold and
+ * turn the warm-open gate into noise.
+ */
+function openTarget(): { win: BrowserWindow | null; reused: boolean } {
+  if (isBenchEnabled()) return { win: getSpareWindow(), reused: false }
+  return getTargetWindow()
+}
+
+/** Hand a brand-new window the previous session's documents, ahead of the file
+ *  that caused it to exist. They arrive as empty tabs and are read only if the
+ *  user goes back to one, so a large session costs nothing here. */
+function sendRestore(win: BrowserWindow, reused: boolean) {
+  if (reused || isBenchEnabled()) return
+
+  const paths = takeRestorePaths()
+  if (paths.length > 0) win.webContents.send('restore-tabs', { paths })
+}
 
 app.whenReady().then(async () => {
   if (process.argv.includes('--bench')) {
@@ -49,14 +73,23 @@ app.whenReady().then(async () => {
       return
     }
 
-    const hadSpare = hasSpareWindow()
-    const win = getSpareWindow()
-    if (!win) return
-
     const fileArgv = payload.argv.filter(a => !a.startsWith('--'))
     const file = fileArgv.length > 0 ? fileArgv[0] : null
 
-    beginOpen(win.webContents.id, payload.t0, !hadSpare)
+    const hadSpare = hasSpareWindow()
+    const target = openTarget()
+    const win = target.win
+    if (!win) return
+
+    if (target.reused) {
+      // Already on screen, so nothing downstream will raise it — paint-done
+      // only shows a window that is still hidden.
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+
+    beginOpen(win.webContents.id, payload.t0, !target.reused && !hadSpare)
+    sendRestore(win, target.reused)
     win.webContents.send('load', { file, cwd: payload.cwd, t0: payload.t0 })
     markDispatch(win.webContents.id)
   })
@@ -87,9 +120,10 @@ app.whenReady().then(async () => {
   if (fileArg && process.argv.includes('--preload')) {
     // Launched by stub's self-healing spawn; stub will send payload separately
   } else if (fileArg) {
-    const win = getSpareWindow()
-    if (win) {
-      win.webContents.send('load', { file: fileArg, cwd: process.cwd(), t0: 0 })
+    const target = openTarget()
+    if (target.win) {
+      sendRestore(target.win, target.reused)
+      target.win.webContents.send('load', { file: fileArg, cwd: process.cwd(), t0: 0 })
     }
   }
 })

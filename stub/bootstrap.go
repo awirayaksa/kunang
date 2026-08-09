@@ -19,6 +19,19 @@ import (
 // version is stamped at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+// buildID identifies the exact payload this binary carries — a hash of
+// payload.zip, stamped alongside version.
+//
+// The extraction marker records it, so a rebuild that keeps the same version
+// still replaces what is on disk. Keying provisioning on the version alone
+// meant every rebuild during development silently kept serving the previous
+// build, and a released patch that reused a version number would have done the
+// same on users' machines.
+var buildID = "dev"
+
+// Written last, so a half-finished extraction never looks complete.
+const completeMarker = ".complete"
+
 var procMessageBoxW = user32.NewProc("MessageBoxW")
 
 const mbIconError = 0x00000010
@@ -55,15 +68,21 @@ func appDir() (string, error) {
 	return filepath.Join(dir, "app", version), nil
 }
 
-// isProvisioned reports whether this version's payload is already on disk. The
-// marker is written last, so a half-finished extraction never looks complete.
-func isProvisioned() bool {
+// isCurrentBuild reports whether the payload already on disk is the one this
+// binary carries. A marker from an older build — or from before markers
+// recorded a build id at all — reads as stale and triggers a replacement.
+func isCurrentBuild() bool {
 	dir, err := appDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(dir, ".complete"))
-	return err == nil
+
+	data, err := os.ReadFile(filepath.Join(dir, completeMarker))
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(string(data)) == buildID
 }
 
 func hostExe() (string, error) {
@@ -74,10 +93,10 @@ func hostExe() (string, error) {
 	return filepath.Join(dir, "kunang.exe"), nil
 }
 
-// extractPayload unzips into a per-process temp directory and renames it into
-// place. Rename is the commit point: two concurrent first runs both extract,
-// but only one lands, and the loser discards its copy.
-func extractPayload(dst string) error {
+// installPayload unzips into a per-process temp directory and renames it into
+// place. Rename is the commit point: two concurrent runs both extract, but only
+// one lands, and the loser discards its copy.
+func installPayload(dst string) error {
 	data := payloadBytes()
 	if len(data) == 0 {
 		return fmt.Errorf("no embedded payload")
@@ -100,7 +119,7 @@ func extractPayload(dst string) error {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(tmp, ".complete"), []byte(version), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, completeMarker), []byte(buildID), 0o644); err != nil {
 		return err
 	}
 
@@ -108,13 +127,36 @@ func extractPayload(dst string) error {
 		return err
 	}
 
+	// Move any previous build aside first. Windows will not rename onto an
+	// existing directory, and this is the step that makes a rebuild at an
+	// unchanged version actually replace what is installed.
+	stale := ""
+	if _, err := os.Stat(dst); err == nil {
+		stale = fmt.Sprintf("%s.old-%d", dst, os.Getpid())
+		if err := os.Rename(dst, stale); err != nil {
+			return fmt.Errorf(
+				"could not replace the installed app.\n\n"+
+					"Something is still holding %s open. Close kunang and try again.\n\n%w", dst, err)
+		}
+	}
+
 	if err := os.Rename(tmp, dst); err != nil {
+		if stale != "" {
+			// Put the working copy back rather than leaving nothing installed.
+			_ = os.Rename(stale, dst)
+		}
 		// Another instance almost certainly won the race. Its copy is as good
 		// as ours, so defer to it rather than fighting over the directory.
-		if isProvisioned() {
+		if isCurrentBuild() {
 			return nil
 		}
 		return err
+	}
+
+	if stale != "" {
+		// Best effort: a leftover .old- directory is untidy but harmless, and
+		// failing the upgrade over it would not be.
+		_ = os.RemoveAll(stale)
 	}
 
 	return nil
@@ -245,20 +287,70 @@ func waitForHost(timeout time.Duration) bool {
 	}
 }
 
-// bootstrap is the first-run path of the single-file portable build: extract,
-// provision, start the host, and wait for it to answer. Subsequent runs of the
-// portable exe short-circuit on isProvisioned() and the fast pipe path takes
-// over — the whole point being that later .md opens only ever run the stub.
+// quitResidentHost asks a running host to exit and waits for it to let go.
+//
+// An upgrade cannot proceed around a live host: it holds kunang.exe and the
+// asar open, so the directory cannot be renamed, and even if it could, the old
+// process would carry on serving every double-click from code that is no
+// longer on disk.
+func quitResidentHost() error {
+	secret, err := getPipeSecret()
+	if err != nil {
+		// No secret file means no host has ever run here.
+		return nil
+	}
+
+	h, errno := connectPipeRaw(secret)
+	if h == INVALID_HANDLE_VALUE {
+		if errno == windows.ERROR_ACCESS_DENIED {
+			// Almost always an elevated host and an unelevated us. Worth
+			// naming: the same mismatch stops Explorer's double-click reaching
+			// that host at all, so it is a problem beyond this upgrade.
+			return fmt.Errorf(
+				"a kunang host is running that this process is not allowed to talk to.\n\n" +
+					"That usually means it was started as administrator. Close it from Task " +
+					"Manager (kunang.exe) and run this again — and prefer to start kunang " +
+					"without administrator rights, or double-clicking a .md cannot reach it.")
+		}
+		// Anything else: no pipe, so nothing resident to stop.
+		return nil
+	}
+
+	_ = writePayload(h, Payload{Argv: []string{"--quit"}, T0: unixNano()})
+	windows.CloseHandle(windows.Handle(h))
+
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if !waitForHost(0) {
+			return nil
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf(
+				"the running kunang host did not exit.\n\n" +
+					"Close any kunang windows — an unsaved document will be waiting on a " +
+					"prompt — and run this again.")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// bootstrap is the install-or-upgrade path of the single-file portable build:
+// stop whatever is resident, extract, provision, start the new host and wait
+// for it to answer. Runs where the installed build already matches skip
+// straight to the fast pipe path — the whole point being that a .md open only
+// ever runs the stub.
 func bootstrap() error {
 	app, err := appDir()
 	if err != nil {
 		return err
 	}
 
-	if !isProvisioned() {
-		if err := extractPayload(app); err != nil {
-			return err
-		}
+	if err := quitResidentHost(); err != nil {
+		return err
+	}
+
+	if err := installPayload(app); err != nil {
+		return err
 	}
 
 	if err := provision(); err != nil {

@@ -6,9 +6,13 @@ let syncing = false
 // #preview-pane is a fixed element in index.html, so it survives every edit
 // mode toggle. initSync used to attach a fresh scroll listener to it on each
 // toggle, multiplying the handlers and leaking them for the life of the
-// window. The editor's scrollDOM is different — a new EditorView is built
-// each time, so its listener goes away with it.
+// window.
 let previewListenerAttached = false
+
+// The editor has the same problem now that one EditorView serves every tab:
+// its scrollDOM outlives a tab switch, so track which view we are attached to
+// rather than assuming a fresh one each time.
+let attachedEditor: EditorView | null = null
 
 /** Suppress the opposite pane's scroll handler while we drive it. */
 function beginSync(): boolean {
@@ -102,7 +106,10 @@ export function initSync() {
   const previewPane = document.getElementById('preview-pane')
   if (!editorView || !previewPane) return
 
-  editorView.scrollDOM.addEventListener('scroll', onEditorScroll)
+  if (attachedEditor !== editorView) {
+    editorView.scrollDOM.addEventListener('scroll', onEditorScroll)
+    attachedEditor = editorView
+  }
 
   if (!previewListenerAttached) {
     previewPane.addEventListener('scroll', onPreviewScroll)

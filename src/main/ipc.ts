@@ -3,7 +3,8 @@ import { openDocument, saveDocument } from './document'
 import { getThemeMode, setThemeMode } from './theme'
 import { getState, markDirty, getScrollPosition, setScrollPosition } from './state'
 import { readCustomCss } from './paths'
-import { setWindowDirty, resolveSave } from './close-guard'
+import { setWindowDirty, resolveSave, unsavedPrompt } from './close-guard'
+import { setWindowPaths } from './session'
 import { allowRemoteFor, revokeRemoteFor } from './protocol'
 import { markPaint, completeOpen, isBenchEnabled } from './bench'
 
@@ -53,9 +54,25 @@ export function registerIpcHandlers() {
     return process.execPath
   })
 
-  ipcMain.on('set-dirty', (event, dirty: boolean, fileName: string) => {
+  ipcMain.on('set-dirty', (event, count: number, fileName: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    if (win) setWindowDirty(win.id, dirty, fileName)
+    if (win) setWindowDirty(win.id, count, fileName)
+  })
+
+  ipcMain.on('tabs-changed', (event, paths: string[]) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win) setWindowPaths(win.id, paths)
+  })
+
+  // Closing a dirty tab asks the same question as closing a dirty window, and
+  // for the same reason it is asked here: a renderer cannot raise a modal and
+  // act on the answer.
+  ipcMain.handle('confirm-close-tab', async (event, fileName: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return 2
+
+    const { response } = await dialog.showMessageBox(win, unsavedPrompt(1, fileName))
+    return response
   })
 
   ipcMain.on('save-result', (event, ok: boolean) => {

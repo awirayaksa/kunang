@@ -4,9 +4,15 @@ import { getThemeBackground } from './theme'
 import { benchStamp } from './bench'
 import { getState, markDirty } from './state'
 import { attachCloseGuard } from './close-guard'
+import { forgetWindow } from './session'
 import { getAppIconPath } from './paths'
 
 const windows = new Map<number, BrowserWindow>()
+
+// Most recently focused first. An open goes to the window the user was last
+// looking at, which is the one they expect a new tab to appear in.
+let focusOrder: number[] = []
+
 let spare: BrowserWindow | null = null
 let rebuilding = false
 let lastBounds: { x: number; y: number; width: number; height: number } | null = null
@@ -103,18 +109,31 @@ export function initBounds() {
   } catch {}
 }
 
-export function createWindow(): BrowserWindow {
-  const win = createBrowserWindow()
-  loadRenderer(win)
+/** Promote a hidden or newly built window to a real one: tracked, guarded, and
+ *  at the front of the focus order. */
+function adoptWindow(win: BrowserWindow) {
+  const id = win.id
+  windows.set(id, win)
+  focusOrder.unshift(id)
+
   trackWindowBounds(win)
   attachCloseGuard(win)
 
-  const id = win.id
-  windows.set(id, win)
+  win.on('focus', () => {
+    focusOrder = [id, ...focusOrder.filter((other) => other !== id)]
+  })
 
   win.on('closed', () => {
     windows.delete(id)
+    focusOrder = focusOrder.filter((other) => other !== id)
+    forgetWindow(id)
   })
+}
+
+export function createWindow(): BrowserWindow {
+  const win = createBrowserWindow()
+  loadRenderer(win)
+  adoptWindow(win)
 
   return win
 }
@@ -155,15 +174,8 @@ export function getSpareWindow(): BrowserWindow | null {
   if (spare) {
     const win = spare
     spare = null
-    windows.set(win.id, win)
-    trackWindowBounds(win)
-    // Only now that the spare is a real, user-visible window â€” a spare has no
-    // document and nothing to lose.
-    attachCloseGuard(win)
-
-    win.on('closed', () => {
-      windows.delete(win.id)
-    })
+    // Promoted only now that the spare is a real, user-visible window.
+    adoptWindow(win)
 
     rebuildSpare()
     return win
@@ -172,15 +184,25 @@ export function getSpareWindow(): BrowserWindow | null {
   // Fallback: create a new window (cold path)
   const win = createBrowserWindow()
   loadRenderer(win)
-  trackWindowBounds(win)
-  attachCloseGuard(win)
-  windows.set(win.id, win)
-
-  win.on('closed', () => {
-    windows.delete(win.id)
-  })
+  adoptWindow(win)
 
   return win
+}
+
+/**
+ * Where the next document should open.
+ *
+ * `reused` marks a window that is already on screen: its renderer adds a tab,
+ * and it has to be raised here, because nothing else will bring it forward.
+ * A fresh window is still hidden and is shown when it reports having painted.
+ */
+export function getTargetWindow(): { win: BrowserWindow | null; reused: boolean } {
+  for (const id of focusOrder) {
+    const win = windows.get(id)
+    if (win && !win.isDestroyed()) return { win, reused: true }
+  }
+
+  return { win: getSpareWindow(), reused: false }
 }
 
 export function getWindow(id: number): BrowserWindow | undefined {

@@ -11,6 +11,7 @@
 // incompatible with a resident host.
 
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -88,6 +89,16 @@ step('zip win-unpacked -> stub/payload.zip', () => {
   process.stdout.write(`  payload: ${mb(payloadZip)} MB\n`)
 })
 
+// Identifies the payload, so the bootstrap can tell a rebuild from the build it
+// already has installed. Version alone cannot: during development the version
+// never moves, and the extracted app would silently stay at whatever was
+// unpacked first.
+const buildID = step('hash payload', () => {
+  const id = createHash('sha256').update(readFileSync(payloadZip)).digest('hex').slice(0, 16)
+  process.stdout.write(`  build id: ${id}\n`)
+  return id
+})
+
 try {
   step('go build portable exe', () => {
     run(
@@ -97,7 +108,7 @@ try {
         '-tags',
         'portable',
         '-ldflags',
-        `${LDFLAGS_BASE} -X main.version=${version}`,
+        `${LDFLAGS_BASE} -X main.version=${version} -X main.buildID=${buildID}`,
         '-o',
         outExe,
         '.',

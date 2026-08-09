@@ -100,9 +100,112 @@ html, body {
   overflow: hidden;
 }
 
+/* The document pane fills what the status bar, and the tab strip when it is
+   showing, leave behind.
+
+   Deliberately height arithmetic rather than a flex column on <body>: Mermaid
+   appends a temporary container to the body while it renders, and as a flex
+   item that container takes layout space and paints over the status bar. */
 #app {
   height: calc(100% - 28px);
   overflow: hidden;
+}
+
+body:has(#tab-strip:not([hidden])) #app {
+  height: calc(100% - 28px - 32px);
+}
+
+/* Tab strip. Hidden by the `hidden` attribute while the window holds a single
+   document, so the common one-file open has no chrome at all. */
+#tab-strip {
+  height: 32px;
+  display: flex;
+  align-items: stretch;
+  background: var(--code-bg);
+  border-bottom: 1px solid var(--border);
+  /* Tabs keep a legible width and the strip scrolls, rather than every tab
+     shrinking to an unreadable sliver once a dozen are open. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+#tab-strip[hidden] {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 220px;
+  padding: 5px 8px 5px 12px;
+  border-right: 1px solid var(--border);
+  /* Reserved so the active tab's amber marker does not shift the label by a
+     pixel when a tab is activated. */
+  border-top: 2px solid transparent;
+  background: var(--code-bg);
+  color: var(--blockquote-fg);
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tab:hover {
+  background: var(--table-stripe);
+}
+
+/* The active tab is lifted out of the strip: document background, and the
+   amber marker BRAND.md reserves for the one thing that matters. */
+.tab.active {
+  background: var(--bg);
+  color: var(--fg);
+  border-top-color: var(--amber-500);
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-dirty {
+  flex: none;
+  color: var(--amber-500);
+  font-size: 10px;
+}
+
+.tab-close {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  /* Present but unobtrusive: reserving the space stops the label reflowing on
+     hover, which would make the close button hard to hit. */
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close,
+.tab-close:focus-visible {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--border);
+}
+
+.tab-close:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
 }
 
 .mode {
@@ -443,6 +546,7 @@ html, body {
     display: block;
   }
 
+  #tab-strip,
   #status-bar,
   #outline-sidebar,
   #find-bar,

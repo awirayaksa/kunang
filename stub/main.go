@@ -85,23 +85,37 @@ func spawnHost() {
 	_ = cmd.Start()
 }
 
-func connectPipe(secret string) (uintptr, error) {
+// connectPipeRaw reports why the connect failed, not just that it did.
+// "No host is running" and "a host is running that we may not talk to" call for
+// completely different advice, and only the errno tells them apart.
+func connectPipeRaw(secret string) (uintptr, windows.Errno) {
 	pipeName := fmt.Sprintf(`\\.\pipe\kunang.%s`, secret)
 	namePtr, err := windows.UTF16PtrFromString(pipeName)
 	if err != nil {
-		return 0, err
+		return INVALID_HANDLE_VALUE, windows.ERROR_INVALID_NAME
 	}
 
-	h, _, _ := procCreateFileW.Call(
+	h, _, callErr := procCreateFileW.Call(
 		uintptr(unsafe.Pointer(namePtr)),
 		GENERIC_READ|GENERIC_WRITE,
 		0, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0,
 	)
 
 	if h == INVALID_HANDLE_VALUE {
-		return 0, fmt.Errorf("connect failed: %s", pipeName)
+		if errno, ok := callErr.(syscall.Errno); ok {
+			return h, windows.Errno(errno)
+		}
+		return h, windows.ERROR_FILE_NOT_FOUND
 	}
 
+	return h, 0
+}
+
+func connectPipe(secret string) (uintptr, error) {
+	h, errno := connectPipeRaw(secret)
+	if h == INVALID_HANDLE_VALUE {
+		return 0, fmt.Errorf(`connect failed: \\.\pipe\kunang.%s: %w`, secret, errno)
+	}
 	return h, nil
 }
 
@@ -156,12 +170,13 @@ func main() {
 		return
 	}
 
-	// Portable single-file build: on first run, unpack ourselves and bring the
-	// host up before doing anything else. Once provisioned this is a stat call,
-	// and the registered handler is the payload-free stub, which skips it
-	// entirely — so only the very first launch ever pays this cost.
+	// Portable single-file build: unpack ourselves and bring the host up before
+	// doing anything else, on first run and on any run carrying a different
+	// build than the one installed. Once the installed build matches this is a
+	// single file read, and the registered handler is the payload-free stub,
+	// which skips it entirely — so a .md open never pays this cost.
 	if hasPayload {
-		if !isProvisioned() {
+		if !isCurrentBuild() {
 			if err := bootstrap(); err != nil {
 				// Built with -H=windowsgui, so there is no console to print to
 				// and first-run failure would otherwise be entirely silent.

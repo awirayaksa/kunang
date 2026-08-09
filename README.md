@@ -31,8 +31,9 @@ kunangstub.exe  (Go, ~2.4MB)                       ~5ms
    |  write {argv, cwd, t0}
    v
 kunang.exe  (Electron main, resident)
-   |  hands the payload to a pre-warmed hidden BrowserWindow
-   |  renderer paints, acks
+   |  hands the payload to the window you were last looking at,
+   |  or to a pre-warmed hidden BrowserWindow if there is none
+   |  renderer opens a tab and paints, acks
    v
 win.show()
    |
@@ -80,8 +81,17 @@ Download `kunang-portable-<version>.exe` (~144MB) and run it. On first run it:
 After that the portable exe has done its job. Double-clicking a `.md` runs only the
 2.4MB stub — the host is already there. Closing a window leaves the host resident.
 
-Running the portable exe again is a no-op if the host is up, and restarts it if not
-(for example after a reboot).
+Running the portable exe again is a no-op if the build it carries is the one already
+installed and the host is up; it restarts the host if not (for example after a
+reboot).
+
+Carrying a **different** build, it upgrades in place: it asks the resident host to
+quit, replaces `app\<version>\`, and starts the new one. What identifies a build is a
+hash of the payload, not the version number — so a rebuild during development
+replaces what is installed even though the version has not moved. Keying this on the
+version alone meant every same-version rebuild silently kept serving the previous
+one. If a document with unsaved changes is holding the old host open, the upgrade
+says so and leaves everything alone rather than forcing it.
 
 > This is not a zero-footprint portable app. A resident host and a file association
 > both need a stable path on disk, so it unpacks once and stays. `--uninstall` plus
@@ -121,8 +131,9 @@ handler until the next logon.
 |---|---|
 | `Ctrl+E` | Toggle edit mode |
 | `Ctrl+F` | Find in page (edit mode uses CodeMirror's own search) |
-| `Esc` | Back out one level — find bar, then edit mode, then the window |
-| `Ctrl+O` | Open file |
+| `Esc` | Back out one level — find bar, then edit mode, then the tab, then the window |
+| `Ctrl+O` | Open file in a new tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (also `Ctrl+PageDown` / `Ctrl+PageUp`) |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As |
 | `Ctrl+\` | Toggle outline sidebar |
 | `Ctrl+Shift+E` | Export self-contained HTML |
@@ -130,12 +141,30 @@ handler until the next logon.
 | `Ctrl` `+` / `-` / `0` | Zoom in / out / reset |
 | `Ctrl+P` | Print |
 | `F5` | Reload from disk (also re-reads `custom.css`) |
-| `Ctrl+W` | Close window (the host survives) |
+| `Ctrl+W` | Close tab (closes the window when it is the last one) |
+| `Ctrl+Shift+W` | Close window (the host survives) |
 
 **Tools** menu also has *Register / Unregister as default .md viewer*.
 
-Drop a `.md` file anywhere to open it. Drop images while in edit mode to insert them
-as markdown, linked relative to the open document.
+### Tabs
+
+Every open adds a tab to the window you were last looking at — a double-click in
+Explorer included. A new window is built only when there is none, which is what
+makes the second open faster than the first: there is no window to construct.
+
+The tab strip only appears once a window holds more than one document, so opening a
+single file looks exactly as it always did. Opening a file that is already open
+brings its tab forward rather than loading a second copy of it. Middle-click or the
+`✕` closes a tab; a tab with unsaved changes asks first.
+
+Open documents are remembered in `state.json` and come back the next time the host
+is started and you open something. Restored tabs are created empty and read only if
+you go back to one, so a large session costs nothing on the open path. Files that
+have since been deleted are dropped silently.
+
+Drop `.md` files anywhere to open them — one tab each. Drop images while in edit
+mode to insert them as markdown, linked relative to the open document. A relative
+link from one document to another opens in a tab.
 
 Markdown is markdown-it with GFM and highlight.js. Math (`$…$`, `$$…$$`) and
 ```` ```mermaid ```` diagrams render via KaTeX and Mermaid, which are **imported only
@@ -165,7 +194,8 @@ DOMPurify. Local images and links are served over a custom `mdfile://` protocol.
 **All remote requests are blocked by default**, so a malicious `.md` cannot phone
 home — a single remote `<img>` is enough to report that a document was opened, and
 from which IP address. When a document wants remote content, a bar says how many
-and offers to load them. That consent is per window and per document, and is
+and offers to load them. That consent is per document — it follows the active tab,
+and switching to another document withdraws it — and is
 deliberately **not** persisted: the safe state is the one you get by doing nothing.
 
 Mermaid runs with `securityLevel: 'strict'` and KaTeX with `throwOnError: false`,
@@ -264,11 +294,11 @@ stub/                  Go — the only non-TypeScript code
   replace_windows.go   ReplaceFileW helper for atomic saves
 src/main/              Electron main: pipe server, warm-spare pool, file I/O,
                        watcher, mdfile:// protocol, install/registration,
-                       close guard, bench instrumentation
+                       close guard, session persistence, bench instrumentation
 src/preload/           contextBridge — the security boundary
 src/renderer/          markdown-it render, CodeMirror 6 editor, morphdom live
                        preview, scroll sync, find, outline, HTML export,
-                       lazy KaTeX/Mermaid
+                       lazy KaTeX/Mermaid, tab strip and per-tab state
 tests/                 unit tests + a deliberately hostile .md corpus
 scripts/               build-portable, release, bench, gen-corpus
 ```
@@ -285,6 +315,7 @@ Not yet done:
 
 - NSIS installer is built but not exercised; only the portable build is released
 - Multiple-window stress test, taskbar grouping, network-drive and WSL paths
+- Tab drag-to-reorder, and dragging a tab out into its own window
 - `idleTimeoutMinutes` — the setting is read from `state.json` but not acted on
 
 ### Known caveats
@@ -293,7 +324,9 @@ Not yet done:
   `AllowSetForegroundWindow`.
 - **SmartScreen.** The portable exe is unsigned, self-extracting, and writes HKCU.
   Expect a SmartScreen prompt until it is code-signed.
-- **Footprint.** ~370MB unpacked, ~200MB resident at idle plus 60–80MB per window.
+- **Footprint.** ~370MB unpacked, ~200MB resident at idle plus 60–80MB per window
+  — which is the main reason opens go to tabs in an existing window rather than
+  to a window each.
   That is the price of TypeScript instead of C++. `state.json` reserves an
   `idleTimeoutMinutes` escape hatch to trade speed back for memory, but nothing
   acts on it yet.

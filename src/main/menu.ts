@@ -50,8 +50,13 @@ export function buildMenu() {
         },
         { type: 'separator' },
         {
-          label: 'Close Window',
+          label: 'Close Tab',
           accelerator: 'CmdOrCtrl+W',
+          click: (_item, win) => sendAction(win, 'close-tab'),
+        },
+        {
+          label: 'Close Window',
+          accelerator: 'CmdOrCtrl+Shift+W',
           click: (_item, win) => win?.close(),
         },
       ],
@@ -59,6 +64,19 @@ export function buildMenu() {
     {
       label: 'View',
       submenu: [
+        // Declared here rather than as renderer keydown handlers: Chromium
+        // reserves Ctrl+Tab and never delivers it to the page.
+        {
+          label: 'Next Tab',
+          accelerator: 'Control+Tab',
+          click: (_item, win) => sendAction(win, 'next-tab'),
+        },
+        {
+          label: 'Previous Tab',
+          accelerator: 'Control+Shift+Tab',
+          click: (_item, win) => sendAction(win, 'prev-tab'),
+        },
+        { type: 'separator' },
         {
           label: 'Toggle Edit Mode',
           accelerator: 'CmdOrCtrl+E',

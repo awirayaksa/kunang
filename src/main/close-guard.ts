@@ -5,8 +5,28 @@ import { BrowserWindow, dialog } from 'electron'
 // answer, and the buffer only exists in the renderer.
 
 interface DirtyState {
-  dirty: boolean
+  /** How many documents in the window are unsaved. A window holds tabs now, so
+   *  one name is no longer the whole story. */
+  count: number
   fileName: string
+}
+
+/** Shared by the window prompt and the per-tab one, so closing a tab and
+ *  closing a window ask the same question in the same words. */
+export function unsavedPrompt(count: number, fileName: string) {
+  return {
+    type: 'warning' as const,
+    buttons: ['Save', "Don't Save", 'Cancel'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'kunang',
+    message:
+      count > 1
+        ? `Save changes to ${count} documents?`
+        : `Save changes to ${fileName || 'this document'}?`,
+    detail: 'Your changes will be lost if you do not save them.',
+    noLink: true,
+  }
 }
 
 const dirtyWindows = new Map<number, DirtyState>()
@@ -20,8 +40,8 @@ const pendingSaves = new Map<number, (ok: boolean) => void>()
 
 const SAVE_TIMEOUT_MS = 10_000
 
-export function setWindowDirty(windowId: number, dirty: boolean, fileName: string) {
-  dirtyWindows.set(windowId, { dirty, fileName })
+export function setWindowDirty(windowId: number, count: number, fileName: string) {
+  dirtyWindows.set(windowId, { count, fileName })
 }
 
 export function clearWindowDirty(windowId: number) {
@@ -63,21 +83,15 @@ export function attachCloseGuard(win: BrowserWindow) {
     if (forceClosing.has(id)) return
 
     const state = dirtyWindows.get(id)
-    if (!state?.dirty) return
+    if (!state || state.count === 0) return
 
     event.preventDefault()
 
     void (async () => {
-      const { response } = await dialog.showMessageBox(win, {
-        type: 'warning',
-        buttons: ['Save', "Don't Save", 'Cancel'],
-        defaultId: 0,
-        cancelId: 2,
-        title: 'kunang',
-        message: `Save changes to ${state.fileName || 'this document'}?`,
-        detail: 'Your changes will be lost if you do not save them.',
-        noLink: true,
-      })
+      const { response } = await dialog.showMessageBox(
+        win,
+        unsavedPrompt(state.count, state.fileName),
+      )
 
       if (response === 2) return // Cancel — stay open.
 
