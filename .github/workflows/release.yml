@@ -78,16 +78,35 @@ jobs:
       - name: Build portable
         run: npm run package:portable
 
-      - name: Verify artifact
+      # Second, because both drive electron-builder and both write
+      # dist/win-unpacked. The portable build embeds a zip of that directory,
+      # so it has to be the one that made it; the installer only needs it to
+      # still be there, and rebuilds it anyway.
+      - name: Build installer
+        run: npm run package
+
+      - name: Verify artifacts
         shell: pwsh
         run: |
-          $exe = "dist/kunang-portable-${{ steps.v.outputs.version }}.exe"
-          if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
-          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-          # A build that silently produced a stub with no payload would still
-          # exist on disk, so assert it is the real thing.
-          if ($mb -lt 50) { Write-Error "$exe is only ${mb}MB - payload missing?"; exit 1 }
-          Write-Host "$exe is ${mb}MB"
+          $version = "${{ steps.v.outputs.version }}"
+
+          # A build that silently produced a stub with no payload, or an
+          # installer with no app inside it, would still exist on disk. Assert
+          # both are the real thing rather than trusting the exit code.
+          $expected = @{
+            "dist/kunang-portable-$version.exe" = 50
+            "dist/kunang-setup-$version.exe"    = 50
+          }
+
+          foreach ($exe in $expected.Keys) {
+            if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
+            $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            if ($mb -lt $expected[$exe]) {
+              Write-Error "$exe is only ${mb}MB - payload missing?"
+              exit 1
+            }
+            Write-Host "$exe is ${mb}MB"
+          }
 
       - name: Publish release
         shell: pwsh
@@ -95,7 +114,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ steps.v.outputs.tag }}"
-          $exe = "dist/kunang-portable-${{ steps.v.outputs.version }}.exe"
+          $version = "${{ steps.v.outputs.version }}"
+
+          # Passed to gh as one variable: PowerShell expands an array into
+          # separate arguments for a native command, so both files upload in a
+          # single call and a partial release is not possible.
+          $assets = @(
+            "dist/kunang-portable-$version.exe",
+            "dist/kunang-setup-$version.exe"
+          )
 
           # Actions runs pwsh with $ErrorActionPreference = 'Stop'. A non-zero
           # exit from a native command can be promoted to a terminating error,
@@ -108,9 +135,9 @@ jobs:
 
           $PSNativeCommandUseErrorActionPreference = $true
 
-          # Re-runs replace the asset rather than failing on an existing release.
+          # Re-runs replace the assets rather than failing on an existing release.
           if ($exists) {
-            gh release upload $tag $exe --clobber
+            gh release upload $tag $assets --clobber
           } else {
-            gh release create $tag $exe --title $tag --generate-notes
+            gh release create $tag $assets --title $tag --generate-notes
           }

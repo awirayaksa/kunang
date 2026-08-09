@@ -50,6 +50,11 @@ win:
       description: Markdown Document
       icon: resources/kunang-md-notepad.ico
 nsis:
+  # Default is "kunang Setup <version>.exe". The spaces make it awkward to
+  # download and to quote on a command line, and they read as a different
+  # project from kunang-portable-<version>.exe sitting beside it on the
+  # release page.
+  artifactName: kunang-setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

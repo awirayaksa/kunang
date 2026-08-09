@@ -99,9 +99,13 @@ says so and leaves everything alone rather than forcing it.
 
 ### Installer
 
-`kunang Setup <version>.exe` — a per-user NSIS installer. Same result, plus a logon
+`kunang-setup-<version>.exe` — a per-user NSIS installer. Same result, plus a logon
 task that re-warms the host 30 seconds after login, so even the first open after a
 reboot is fast. The portable build deliberately does not create that task.
+
+Install one or the other, not both: they register the same `.md` association and
+each wants a resident host at its own path, so the two would compete for the same
+named pipe.
 
 ### Making it the default `.md` app
 
@@ -233,7 +237,7 @@ npm run verify:tabs       # drag-to-reorder and tear-out, in a running host
 npm run verify:ctrl-tab   # Ctrl+Tab, via real keystrokes to a real window
 
 npm run package:portable  # -> dist/kunang-portable-<version>.exe
-npm run package           # -> dist/kunang Setup <version>.exe  (NSIS)
+npm run package           # -> dist/kunang-setup-<version>.exe  (NSIS)
 npm run release           # bump, tag, push — CI builds and publishes
 ```
 
@@ -254,7 +258,8 @@ the saved session afterwards, so neither disturbs an installed kunang. They need
 Releases are cut with `npm run release` (`-- minor`, `-- major`, or an exact
 `x.y.z`). It refuses to run on a dirty tree, off `main`, or out of sync with the
 remote, then bumps, tags and pushes. Pushing the tag is what builds: a Windows
-runner produces the portable exe and attaches it to the GitHub release.
+runner produces both the portable exe and the NSIS installer, checks each is large
+enough to actually contain an app, and attaches the pair to the GitHub release.
 
 `npm run package:portable` runs six steps in order:
 
@@ -340,7 +345,8 @@ benchmark gate.
 
 Not yet done:
 
-- NSIS installer is built but not exercised; only the portable build is released
+- NSIS installer builds and is now attached to releases, but installing and
+  running the result is still untested; the portable build is the verified one
 - Multiple-window stress test, taskbar grouping, network-drive and WSL paths
 - `idleTimeoutMinutes` — the setting is read from `state.json` but not acted on
 

@@ -251,9 +251,21 @@ function dragOutScript(from) {
 
 // --- Run -------------------------------------------------------------------
 
+// Buffers, not strings: these are restored byte for byte, and a host pointer
+// that gains so much as a BOM names a path that does not exist -- which leaves
+// the installed kunang unable to start at all.
 const backup = new Map()
 for (const f of [join(dataDir, 'host'), join(dataDir, 'state.json')]) {
   if (existsSync(f)) backup.set(f, readFileSync(f))
+}
+
+// The host writes its own path here on startup, so a dev host that was run
+// outside this script has already overwritten it. Restoring that value would
+// preserve the damage rather than undo it.
+const pointer = join(dataDir, 'host')
+if (existsSync(pointer) && readFileSync(pointer, 'utf8').trim() === electron) {
+  console.log(`WARNING: ${pointer} already names the dev host.`)
+  console.log('         Run the portable exe once afterwards to point it back at the installed host.\n')
 }
 
 let child = null

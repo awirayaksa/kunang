@@ -50,14 +50,29 @@ foreach ($p in @($stub, $docA, $docB, (Join-Path $root 'out\main\index.js'))) {
 
 # --- Back up the state this test would otherwise trample ------------------
 
+$electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
+
 $hostPointer = Join-Path $dataDir 'host'
 $stateFile = Join-Path $dataDir 'state.json'
+
+# Bytes, not text. Set-Content -Encoding utf8 writes a BOM on Windows
+# PowerShell 5.1, and a host pointer that begins with one names a path that
+# does not exist -- which leaves the installed kunang unable to start at all.
 $backup = @{}
 foreach ($f in @($hostPointer, $stateFile)) {
-  if (Test-Path $f) { $backup[$f] = Get-Content $f -Raw }
+  if (Test-Path $f) { $backup[$f] = [System.IO.File]::ReadAllBytes($f) }
 }
 
-$electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
+# The host writes its own path here on startup, so a dev host that was run
+# outside this script has already overwritten it. Restoring that value would
+# preserve the damage rather than undo it.
+if (Test-Path $hostPointer) {
+  $pointed = [System.IO.File]::ReadAllText($hostPointer).Trim()
+  if ($pointed -eq $electron) {
+    Write-Host "WARNING: $hostPointer already names the dev host."
+    Write-Host '         Run the portable exe once afterwards to point it back at the installed host.'
+  }
+}
 $hostProc = $null
 
 function Get-KunangWindowProc {
@@ -189,7 +204,7 @@ finally {
   # restore.
   Start-Sleep -Milliseconds 800
   foreach ($f in $backup.Keys) {
-    Set-Content -Path $f -Value $backup[$f] -NoNewline -Encoding utf8
+    [System.IO.File]::WriteAllBytes($f, $backup[$f])
   }
   Say 'Restored the host pointer and saved session.'
 }
