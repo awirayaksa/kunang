@@ -338,15 +338,14 @@ scripts/               build-portable, release, bench, gen-corpus, and the two
 ## Status
 
 Pre-1.0 but feature-complete against its original plan. Working: the resident-host
-fast path, portable single-file build, view and edit modes, find, encoding
+fast path, both distributions — portable single-file and NSIS installer, the
+latter with its logon warm-up task — view and edit modes, find, encoding
 round-trip, atomic save, file watching with delete and rename handling, outline,
 HTML export, theming, lazy math and diagrams, drag & drop, `custom.css`, and the
 benchmark gate.
 
 Not yet done:
 
-- NSIS installer builds and is now attached to releases, but installing and
-  running the result is still untested; the portable build is the verified one
 - Multiple-window stress test, taskbar grouping, network-drive and WSL paths
 - `idleTimeoutMinutes` — the setting is read from `state.json` but not acted on
 
