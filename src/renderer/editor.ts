@@ -1,12 +1,96 @@
 import { EditorView, basicSetup } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { keymap } from '@codemirror/view'
 import { indentWithTab } from '@codemirror/commands'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags } from '@lezer/highlight'
 
 let editorView: EditorView | null = null
 
-export function initEditor(): EditorView {
+// Everything colour-bearing is a CSS variable from view.css, so switching
+// theme repaints the editor without rebuilding it. Only the things CodeMirror
+// cannot express as CSS — its dark flag and the syntax highlighting — need the
+// compartment below.
+const BASE_THEME = EditorView.theme({
+  '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--fg)' },
+  '.cm-scroller': { overflow: 'auto' },
+  '.cm-content': {
+    fontFamily: "'Cascadia Mono', 'Consolas', 'Courier New', monospace",
+    fontSize: '14px',
+    padding: '16px',
+    // Fallback only: CodeMirror sets caret-color: transparent and draws
+    // .cm-cursor itself, so the rule below is what actually colours the caret.
+    caretColor: 'var(--caret)',
+  },
+  '.cm-cursor, .cm-dropCursor': {
+    borderLeftColor: 'var(--caret)',
+    borderLeftWidth: '2px',
+  },
+  '&.cm-focused': { outline: 'none' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
+    backgroundColor: 'var(--selection)',
+  },
+  '.cm-activeLine': { backgroundColor: 'var(--active-line)' },
+  '.cm-gutters': { display: 'none' },
+  // The search panel ships with light-theme defaults, which would sit as a
+  // pale slab on a dark editor.
+  '.cm-panels': { backgroundColor: 'var(--panel-bg)', color: 'var(--fg)' },
+  '.cm-panels input, .cm-panels button': {
+    backgroundColor: 'var(--bg)',
+    color: 'var(--fg)',
+    border: '1px solid var(--border)',
+    borderRadius: '4px',
+    padding: '2px 6px',
+  },
+  '.cm-searchMatch': { backgroundColor: 'rgba(255, 233, 168, 0.35)' },
+  '.cm-searchMatch.cm-searchMatch-selected': {
+    backgroundColor: 'var(--amber-400)',
+    color: 'var(--night-900)',
+  },
+})
+
+/**
+ * Markdown highlighting for a dark editor.
+ *
+ * basicSetup's defaultHighlightStyle is tuned for a light background and its
+ * blues and purples go muddy on night. Kept close to the brand: structure is
+ * carried by weight and amber, not by a spread of hues.
+ */
+const DARK_HIGHLIGHT = HighlightStyle.define(
+  [
+    { tag: tags.heading, color: '#FFD980', fontWeight: 'bold' },
+    { tag: tags.strong, color: '#F6F4EF', fontWeight: 'bold' },
+    { tag: tags.emphasis, color: '#F6F4EF', fontStyle: 'italic' },
+    { tag: tags.strikethrough, textDecoration: 'line-through' },
+    { tag: tags.link, color: '#FFC247', textDecoration: 'underline' },
+    { tag: tags.url, color: '#9AA3B8' },
+    { tag: tags.monospace, color: '#FFD980' },
+    { tag: tags.quote, color: '#9AA3B8', fontStyle: 'italic' },
+    { tag: tags.list, color: '#FFC247' },
+    // The syntax markers themselves (#, *, backticks) recede.
+    { tag: tags.processingInstruction, color: '#5C6A8A' },
+    { tag: tags.contentSeparator, color: '#5C6A8A' },
+  ],
+  { themeType: 'dark' },
+)
+
+const themeMode = new Compartment()
+
+function themeExtensions(dark: boolean) {
+  // Light needs nothing: basicSetup's defaultHighlightStyle is registered with
+  // fallback: true, so it applies exactly when no other style is active.
+  return dark ? [EditorView.theme({}, { dark: true }), syntaxHighlighting(DARK_HIGHLIGHT)] : []
+}
+
+/** Repaint the editor for a theme change without losing document or cursor. */
+export function setEditorTheme(dark: boolean) {
+  editorView?.dispatch({
+    effects: themeMode.reconfigure(themeExtensions(dark)),
+  })
+}
+
+export function initEditor(dark: boolean): EditorView {
   const container = document.getElementById('editor-container')!
   if (editorView) {
     editorView.destroy()
@@ -25,47 +109,8 @@ export function initEditor(): EditorView {
             onContentChange()
           }
         }),
-        // Brand palette — see resources/BRAND.md. The source pane is night
-        // with paper text, and the caret is amber-400: it is the one moving
-        // amber element in the interface, and that restraint is the point.
-        EditorView.theme(
-          {
-            '&': { height: '100%', backgroundColor: '#070B16', color: '#F6F4EF' },
-            '.cm-scroller': { overflow: 'auto' },
-            '.cm-content': {
-              fontFamily: "'Cascadia Mono', 'Consolas', 'Courier New', monospace",
-              fontSize: '14px',
-              padding: '16px',
-              // Fallback only: CodeMirror sets caret-color: transparent and
-              // draws .cm-cursor itself, so the rule below is the one that
-              // actually colours the caret.
-              caretColor: '#FFC247',
-            },
-            '.cm-cursor, .cm-dropCursor': {
-              borderLeftColor: '#FFC247',
-              borderLeftWidth: '2px',
-            },
-            '&.cm-focused': { outline: 'none' },
-            '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': {
-              backgroundColor: '#1B2542',
-            },
-            '.cm-activeLine': { backgroundColor: 'rgba(255, 233, 168, 0.05)' },
-            '.cm-gutters': { display: 'none' },
-            // The search panel ships with light-theme defaults that would sit
-            // as a white slab on the night pane.
-            '.cm-panels': { backgroundColor: '#0E1426', color: '#F6F4EF' },
-            '.cm-panels input, .cm-panels button': {
-              backgroundColor: '#070B16',
-              color: '#F6F4EF',
-              border: '1px solid #1B2542',
-              borderRadius: '4px',
-              padding: '2px 6px',
-            },
-            '.cm-searchMatch': { backgroundColor: 'rgba(255, 233, 168, 0.35)' },
-            '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: '#FFC247', color: '#070B16' },
-          },
-          { dark: true },
-        ),
+        BASE_THEME,
+        themeMode.of(themeExtensions(dark)),
       ],
     }),
     parent: container,

@@ -32,6 +32,14 @@
   --hr: #DDD8CC;
   --focus: rgba(255, 233, 168, 0.4);
   --danger: #A33A33;
+
+  /* Editor surfaces. The caret stays amber in both themes — it is the brand's
+     one moving element — but amber-400 on paper is barely a smudge at 2px, so
+     light gets a deeper amber that is still the same hue. */
+  --caret: #B87309;
+  --selection: #DCD5C2;
+  --active-line: rgba(255, 176, 32, 0.07);
+  --panel-bg: #EDEAE1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -48,6 +56,11 @@
     --hr: var(--tile-hi);
     --focus: rgba(255, 233, 168, 0.4);
     --danger: #E08078;
+
+    --caret: var(--amber-400);
+    --selection: var(--tile-hi);
+    --active-line: rgba(255, 233, 168, 0.05);
+    --panel-bg: var(--night-800);
   }
 }
 
@@ -64,6 +77,11 @@
   --hr: var(--tile-hi);
   --focus: rgba(255, 233, 168, 0.4);
   --danger: #E08078;
+
+  --caret: var(--amber-400);
+  --selection: var(--tile-hi);
+  --active-line: rgba(255, 233, 168, 0.05);
+  --panel-bg: var(--night-800);
 }
 
 * {
@@ -114,14 +132,15 @@ html, body {
   width: 100%;
 }
 
-/* The editor pane is night regardless of theme — BRAND.md is explicit that the
-   source side is dark with an amber caret, and that the caret is the one
-   moving amber element in the interface. The preview follows the theme, so a
-   dark-theme window does not get a page of blinding white beside it. */
+/* Both panes follow the theme. BRAND.md's in-app note asks for a night editor
+   pane, but taken literally that puts a black editor beside a paper preview in
+   light mode, which reads as a rendering fault rather than a design. The amber
+   caret is the part of that guidance that carries the brand, and it survives
+   in both themes. */
 #source-pane {
   flex: 1;
   overflow: hidden;
-  background: var(--night-900);
+  background: var(--bg);
   /* The active-pane divider, glow at 40%. */
   border-right: 1px solid var(--focus);
 }

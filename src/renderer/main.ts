@@ -30,7 +30,14 @@ declare global {
 }
 
 import { initRenderer, didSkipHighlight } from './render'
-import { initEditor, getEditorContent, setEditorContent, onEditorChange, insertAtCursor } from './editor'
+import {
+  initEditor,
+  getEditorContent,
+  setEditorContent,
+  onEditorChange,
+  insertAtCursor,
+  setEditorTheme,
+} from './editor'
 import { toRelativePath, basename } from './relpath'
 import { updatePreview } from './preview'
 import { initSync } from './sync'
@@ -141,7 +148,7 @@ function showEdit() {
   editMode.classList.add('active')
   isEditMode = true
 
-  initEditor()
+  initEditor(isDarkTheme())
 
   if (currentContent) {
     setEditorContent(currentContent)
@@ -415,6 +422,17 @@ function applyTheme() {
   } else {
     root.dataset.theme = themeMode
   }
+
+  // CSS variables carry the editor's colours, but CodeMirror's dark flag and
+  // syntax highlighting are extensions and have to be reconfigured. No-op when
+  // no editor exists yet.
+  setEditorTheme(isDarkTheme())
+
+  // Mermaid bakes its palette into the SVG at render time, so an already-drawn
+  // diagram keeps the old theme until the document is rendered again.
+  if (!isEditMode && currentFile && viewContent.querySelector('.mermaid-block')) {
+    renderView(initRenderer(currentContent, currentFile))
+  }
 }
 
 function cycleTheme() {
@@ -425,6 +443,11 @@ function cycleTheme() {
   window.kunang.setTheme(themeMode)
   flashStatus(`Theme: ${themeMode}`)
 }
+
+// In auto mode the OS can change the theme under us while a window is open.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (themeMode === 'auto') applyTheme()
+})
 
 // Keyboard shortcuts
 document.addEventListener('keydown', async (e) => {
