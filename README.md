@@ -134,6 +134,7 @@ handler until the next logon.
 | `Esc` | Back out one level — find bar, then edit mode, then the tab, then the window |
 | `Ctrl+O` | Open file in a new tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab (also `Ctrl+PageDown` / `Ctrl+PageUp`) |
+| `Ctrl+Shift+PageDown` / `PageUp` | Move the current tab along the strip |
 | `Ctrl+S` / `Ctrl+Shift+S` | Save / Save As |
 | `Ctrl+\` | Toggle outline sidebar |
 | `Ctrl+Shift+E` | Export self-contained HTML |
@@ -156,6 +157,14 @@ The tab strip only appears once a window holds more than one document, so openin
 single file looks exactly as it always did. Opening a file that is already open
 brings its tab forward rather than loading a second copy of it. Middle-click or the
 `✕` closes a tab; a tab with unsaved changes asks first.
+
+Drag a tab along the strip to reorder it — the order is what gets saved as the
+session, so a restored window comes back arranged the way you left it. Drag a tab
+*off* the strip and drop it on the document below, or outside the window, and it
+gets a window of its own. That is a move rather than a copy: the new window reads
+the file and the old one closes its tab, so no document is ever open twice. A tab
+with unsaved changes cannot go — the new window would read the file from disk and
+the edits would be gone — so save it first.
 
 Open documents are remembered in `state.json` and come back the next time the host
 is started and you open something. Restored tabs are created empty and read only if
@@ -220,10 +229,27 @@ npm run build:stub        # just the Go stub (fast iteration)
 npm run gen:corpus        # regenerate the encoding fixtures + 2mb.md
 npm run bench             # 50 warm opens, checks the p95 gate
 
+npm run verify:tabs       # drag-to-reorder and tear-out, in a running host
+npm run verify:ctrl-tab   # Ctrl+Tab, via real keystrokes to a real window
+
 npm run package:portable  # -> dist/kunang-portable-<version>.exe
 npm run package           # -> dist/kunang Setup <version>.exe  (NSIS)
 npm run release           # bump, tag, push — CI builds and publishes
 ```
+
+The two `verify:` harnesses exist because some behaviour has no unit test that
+could ever be honest about it. Chromium reserves `Ctrl+Tab` and never delivers it
+to the page, so kunang declares it as a menu accelerator — a route with no
+renderer-side seam to test against. Tab drags are the same: the model is unit
+tested, but which listener wins a drop, and whether a tear-out really produces a
+second window, only exist in a running app.
+
+So both drive one. They stop the resident host, start a dev host from `out/`, and
+put the questions to it directly — `verify:ctrl-tab` through `SendKeys` into the
+real window, reading the answer off the title bar; `verify:tabs` over the DevTools
+protocol, synthesizing drags on the real DOM. Both restore the host pointer and
+the saved session afterwards, so neither disturbs an installed kunang. They need
+`npm run build` first, and they take the foreground while they run.
 
 Releases are cut with `npm run release` (`-- minor`, `-- major`, or an exact
 `x.y.z`). It refuses to run on a dirty tree, off `main`, or out of sync with the
@@ -300,7 +326,8 @@ src/renderer/          markdown-it render, CodeMirror 6 editor, morphdom live
                        preview, scroll sync, find, outline, HTML export,
                        lazy KaTeX/Mermaid, tab strip and per-tab state
 tests/                 unit tests + a deliberately hostile .md corpus
-scripts/               build-portable, release, bench, gen-corpus
+scripts/               build-portable, release, bench, gen-corpus, and the two
+                       verify harnesses that drive a real running host
 ```
 
 ## Status
@@ -315,7 +342,6 @@ Not yet done:
 
 - NSIS installer is built but not exercised; only the portable build is released
 - Multiple-window stress test, taskbar grouping, network-drive and WSL paths
-- Tab drag-to-reorder, and dragging a tab out into its own window
 - `idleTimeoutMinutes` — the setting is read from `state.json` but not acted on
 
 ### Known caveats

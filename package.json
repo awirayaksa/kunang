@@ -15,6 +15,8 @@
     "gen:icons": "electron scripts/gen-icons.mjs",
     "bench": "node scripts/bench.mjs",
     "test": "tsx tests/unit/index.ts",
+    "verify:tabs": "node scripts/verify-tab-drag.mjs",
+    "verify:ctrl-tab": "powershell -ExecutionPolicy Bypass -File scripts/verify-ctrl-tab.ps1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/"
   },

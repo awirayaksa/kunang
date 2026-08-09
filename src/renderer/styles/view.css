@@ -141,6 +141,8 @@ body:has(#tab-strip:not([hidden])) #app {
   flex: none;
   max-width: 220px;
   padding: 5px 8px 5px 12px;
+  /* The insertion marker is a pseudo-element pinned to a tab's edge. */
+  position: relative;
   border-right: 1px solid var(--border);
   /* Reserved so the active tab's amber marker does not shift the label by a
      pixel when a tab is activated. */
@@ -163,6 +165,33 @@ body:has(#tab-strip:not([hidden])) #app {
   background: var(--bg);
   color: var(--fg);
   border-top-color: var(--amber-500);
+}
+
+/* Being dragged. Faded rather than hidden, so the strip does not reflow under
+   the pointer mid-drag and move every drop target the user is aiming at. */
+.tab.drag-source {
+  opacity: 0.4;
+}
+
+/* Where the tab will land. Drawn on the neighbouring tab's edge, which is the
+   one place a 2px line survives the strip scrolling sideways. */
+.tab.drop-before::before,
+.tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--amber-500);
+  pointer-events: none;
+}
+
+.tab.drop-before::before {
+  left: -1px;
+}
+
+.tab.drop-after::after {
+  right: -1px;
 }
 
 .tab-label {

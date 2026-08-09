@@ -5,6 +5,7 @@ import { getState, markDirty, getScrollPosition, setScrollPosition } from './sta
 import { readCustomCss } from './paths'
 import { setWindowDirty, resolveSave, unsavedPrompt } from './close-guard'
 import { setWindowPaths } from './session'
+import { openDetachedWindow } from './windows'
 import { allowRemoteFor, revokeRemoteFor } from './protocol'
 import { markPaint, completeOpen, isBenchEnabled } from './bench'
 
@@ -52,6 +53,20 @@ export function registerIpcHandlers() {
 
   ipcMain.handle('get-app-path', () => {
     return process.execPath
+  })
+
+  // A tab dragged off the strip. The renderer closes its own copy once this
+  // resolves, so the document is never open in two windows at once — the
+  // watcher and the dirty state both assume it is not.
+  ipcMain.handle('detach-tab', (event, filePath: string) => {
+    const source = BrowserWindow.fromWebContents(event.sender)
+    const win = openDetachedWindow(source)
+    if (!win) return false
+
+    // Same message the pipe sends for a double-click, so the new window takes
+    // the ordinary open path — including showing itself once it has painted.
+    win.webContents.send('load', { file: filePath, cwd: '', t0: 0 })
+    return true
   })
 
   ipcMain.on('set-dirty', (event, count: number, fileName: string) => {

@@ -20,6 +20,7 @@ interface KunangAPI {
   setDirty: (count: number, fileName: string) => void
   tabsChanged: (paths: string[]) => void
   confirmCloseTab: (fileName: string) => Promise<number>
+  detachTab: (filePath: string) => Promise<boolean>
   onRequestSave: (callback: () => void) => void
   saveResult: (ok: boolean) => void
   allowRemote: () => void
@@ -51,18 +52,23 @@ import { initSync } from './sync'
 import { exportHTML } from './export'
 import { initFind, openFind, closeFind, isFindOpen, refreshFind } from './find'
 import { enhance } from './lazy-render'
-import { TabData } from './tab-model'
+import { TabData, stepIndex } from './tab-model'
 import {
   initTabs,
   addTab,
   activeTab,
+  activeTabIndex,
   allTabs,
   tabCount,
   tabById,
   tabForPath,
   setActiveTab,
   removeTab,
+  moveTabById,
   neighbourTab,
+  draggingTabId,
+  endTabDrag,
+  isInStrip,
   getEditorState,
   setEditorState,
   clearEditorState,
@@ -439,6 +445,55 @@ async function closeTab(id: number): Promise<void> {
   }
 }
 
+/** Put a tab at a new position. Nothing on screen changes — the same document
+ *  stays active — so only the strip and the persisted order are touched. */
+async function reorderTab(id: number, toIndex: number): Promise<void> {
+  if (!moveTabById(id, toIndex)) return
+
+  renderStrip()
+  // Strip order is session order: a restored window should come back the way
+  // the user arranged it.
+  pushTabs()
+}
+
+/** The keyboard route to a reorder, on the keys every browser uses for it.
+ *  Wraps, like Ctrl+PageDown does. */
+function shiftTab(delta: number) {
+  enqueue(async () => {
+    const tab = activeTab()
+    if (!tab || tabCount() < 2) return
+    await reorderTab(tab.id, stepIndex(tabCount(), activeTabIndex(), delta))
+  })
+}
+
+/**
+ * Give a tab its own window.
+ *
+ * The document moves rather than being copied: the new window loads it from
+ * disk and this one closes its tab, so there is never a second buffer for the
+ * same file. That is also why an unsaved one cannot go — the new window would
+ * read the file and silently lose the edits.
+ */
+async function detachTab(id: number): Promise<void> {
+  const tab = tabById(id)
+  if (!tab) return
+
+  // Already a window of its own.
+  if (tabCount() < 2) return
+
+  if (!tab.path || tab.dirty) {
+    flashStatus('Save the document before moving it to its own window')
+    return
+  }
+
+  if (!(await window.kunang.detachTab(tab.path))) {
+    flashStatus('Could not open a new window')
+    return
+  }
+
+  await closeTab(id)
+}
+
 function stepTab(delta: number) {
   // Resolved inside the queue, not at the keypress: holding Ctrl+Tab enqueues
   // faster than activations complete, and computing the neighbour up front
@@ -764,9 +819,15 @@ document.addEventListener('keydown', async (e) => {
 
   // A second route to the tab accelerators in the menu, for the Page keys
   // Chromium does not reserve.
-  if (e.ctrlKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
+  if (e.ctrlKey && !e.shiftKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
     e.preventDefault()
     stepTab(e.key === 'PageDown' ? 1 : -1)
+  }
+
+  // Adding Shift moves the tab instead of moving to it.
+  if (e.ctrlKey && e.shiftKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
+    e.preventDefault()
+    shiftTab(e.key === 'PageDown' ? 1 : -1)
   }
 
   if (e.ctrlKey && e.key === 'o') {
@@ -831,7 +892,8 @@ const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i
 
 document.addEventListener('dragover', (e) => {
   e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  // A tab in flight is being moved, not copied, and the cursor should say so.
+  if (e.dataTransfer) e.dataTransfer.dropEffect = draggingTabId() === null ? 'copy' : 'move'
 })
 
 // Capture phase: CodeMirror installs its own drop handler on the editor, and
@@ -839,6 +901,25 @@ document.addEventListener('dragover', (e) => {
 document.addEventListener(
   'drop',
   (e) => {
+    // A tab dragged off the strip and released over the document: it wants its
+    // own window. Caught here rather than in tabs.ts because by this point the
+    // strip is not in the event path at all.
+    const dragged = draggingTabId()
+    if (dragged !== null) {
+      // Unless it landed back on the strip, where it is an ordinary reorder.
+      // This listener is in the capture phase and so runs before the strip's
+      // own handler; without this check it would swallow every reorder.
+      if (isInStrip(e.target as Node | null)) return
+
+      e.preventDefault()
+      e.stopPropagation()
+      // Resolve the drag now: dragend fires after this and would otherwise
+      // read it as a release that nothing handled.
+      endTabDrag()
+      enqueue(() => detachTab(dragged))
+      return
+    }
+
     const files = Array.from(e.dataTransfer?.files ?? [])
     if (files.length === 0) return
 
@@ -979,6 +1060,8 @@ void applyCustomCss()
 initTabs({
   onActivate: (id) => enqueue(() => activateTab(id)),
   onCloseRequest: (id) => enqueue(() => closeTab(id)),
+  onReorder: (id, toIndex) => enqueue(() => reorderTab(id, toIndex)),
+  onDetach: (id) => enqueue(() => detachTab(id)),
 })
 
 initFind(viewMode, viewContent)

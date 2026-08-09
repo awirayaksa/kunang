@@ -205,6 +205,26 @@ export function getTargetWindow(): { win: BrowserWindow | null; reused: boolean 
   return { win: getSpareWindow(), reused: false }
 }
 
+/**
+ * A window for a tab that has been dragged out of `source`.
+ *
+ * Served from the warm pool like any other open, then offset from the window
+ * it came from: the spare is constructed with the last saved bounds, so
+ * without this it would land exactly on top of its source and the tear-out
+ * would look like nothing happened.
+ */
+export function openDetachedWindow(source: BrowserWindow | null): BrowserWindow | null {
+  const win = getSpareWindow()
+  if (!win) return null
+
+  if (source && !source.isDestroyed() && !win.isDestroyed()) {
+    const from = source.getBounds()
+    win.setBounds({ x: from.x + 32, y: from.y + 32, width: from.width, height: from.height })
+  }
+
+  return win
+}
+
 export function getWindow(id: number): BrowserWindow | undefined {
   return windows.get(id)
 }

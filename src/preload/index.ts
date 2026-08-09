@@ -55,6 +55,9 @@ const api = {
   confirmCloseTab: (fileName: string): Promise<number> => {
     return ipcRenderer.invoke('confirm-close-tab', fileName)
   },
+  detachTab: (filePath: string): Promise<boolean> => {
+    return ipcRenderer.invoke('detach-tab', filePath)
+  },
   onRequestSave: (callback: () => void) => {
     ipcRenderer.on('request-save', () => callback())
   },
