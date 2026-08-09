@@ -1,6 +1,6 @@
 {
   "name": "kunang",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Notepad-fast Markdown viewer/editor for Windows",
   "main": "./out/main/index.js",
   "scripts": {
