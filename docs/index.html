@@ -1,0 +1,1485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kunang — Notepad-fast Markdown for Windows</title>
+<meta name="description" content="A fast, simple Markdown viewer and editor for Windows. Notepad opens .txt instantly. kunang does that for .md — double-click to a rendered document in 47ms.">
+<meta property="og:title" content="kunang — Notepad-fast Markdown for Windows">
+<meta property="og:description" content="Notepad for .txt. kunang for .md. Double-click to a rendered document in 47 milliseconds.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#070B16">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23070B16'/%3E%3Cpath d='M22 74V32l28 30 28-30v42' fill='none' stroke='%23FFC247' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='78' cy='32' r='9' fill='%23FFFBEC'/%3E%3C/svg%3E">
+</head>
+<body>
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   kunang — night → dawn → night
+   Palette is locked to resources/BRAND.md: two hues only, night + amber.
+   Every surface colour is derived at runtime from a single --dawn value.
+   ═══════════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  /* brand tokens, verbatim from resources/BRAND.md */
+  --night-900: #070B16;
+  --night-800: #0E1426;
+  --tile-hi:   #1B2542;
+  --amber-500: #FFB020;
+  --amber-400: #FFC247;
+  --amber-300: #FFD980;
+  --glow:      #FFE9A8;
+  --core:      #FFFBEC;
+  --paper:     #F6F4EF;
+
+  /* runtime-derived surfaces — JS rewrites these as you scroll.
+     Seeded with the night values so the page is correct before JS runs. */
+  --bg-rgb:    7 11 22;
+  --ink-rgb:   233 236 244;
+  --panel-rgb: 20 25 37;
+  --line-rgb:  43 49 65;
+  --mute-rgb:  146 152 168;
+  --accent-rgb: 255 194 71;
+
+  --bg:     rgb(var(--bg-rgb));
+  --ink:    rgb(var(--ink-rgb));
+  --panel:  rgb(var(--panel-rgb));
+  --line:   rgb(var(--line-rgb));
+  --mute:   rgb(var(--mute-rgb));
+  --accent: rgb(var(--accent-rgb));
+
+  /* The page is set in the operating system's own typefaces.
+     A site about beating Windows' own cold-start has no business
+     downloading a font to say so. */
+  --display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --text:    "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  --mono:    "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, "SF Mono", "Roboto Mono", monospace;
+
+  --edge: clamp(1.25rem, 5vw, 5rem);
+  --measure: 62ch;
+  --r: 14px;
+}
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--text);
+  font-size: clamp(1rem, 0.94rem + 0.28vw, 1.125rem);
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  /* clip, not hidden — `overflow: hidden` here would turn body into a
+     scroll container and quietly break the sticky nav and the race section. */
+  overflow-x: clip;
+  /* No transition here on purpose: paint() rewrites the tokens every frame, and a
+     transition on body alone would lag behind the panels and borders that derive
+     from the same values. */
+}
+
+/* ── the sky: a fixed wash that keeps the ground from ever looking flat ── */
+.sky {
+  position: fixed; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(120vw 90vh at 78% -18%, rgb(var(--accent-rgb) / calc(0.10 * var(--night, 1))), transparent 62%),
+    radial-gradient(90vw 70vh at 8% 4%, rgb(27 37 66 / calc(0.55 * var(--night, 1))), transparent 60%);
+}
+.stars { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: var(--night, 1); }
+
+/* ── type scale ── */
+h1, h2, h3, .display {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: -0.028em;
+  line-height: 1.04;
+  text-wrap: balance;
+  margin: 0;
+}
+h1 { font-size: clamp(2.6rem, 1.3rem + 5.6vw, 5.4rem); }
+h2 { font-size: clamp(2rem, 1.2rem + 3.2vw, 3.5rem); }
+h3 { font-size: clamp(1.1rem, 1rem + 0.5vw, 1.35rem); letter-spacing: -0.018em; }
+p  { margin: 0; }
+a  { color: inherit; }
+
+code, kbd, .mono { font-family: var(--mono); font-size: 0.88em; font-variant-ligatures: none; }
+/* Paths like %LOCALAPPDATA%\kunang\app\<version>\ have no natural break point and
+   would otherwise push a narrow layout sideways. */
+code { color: var(--accent); overflow-wrap: anywhere; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--mute);
+  display: flex; align-items: center; gap: 0.7rem;
+  margin: 0 0 1.4rem;
+}
+.eyebrow::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--amber-400);
+  box-shadow: 0 0 10px 2px rgb(255 194 71 / 0.55);
+  flex: none;
+}
+.lede { color: var(--mute); max-width: var(--measure); font-size: 1.06em; }
+
+/* ── layout ── */
+.wrap { max-width: 1180px; margin-inline: auto; padding-inline: var(--edge); }
+section { position: relative; }
+.band { padding-block: clamp(4rem, 8vh, 7rem); }
+
+:where(a, button, input, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--glow);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* ── nav ── */
+.nav {
+  position: sticky; top: 0; z-index: 60;
+  /* Dissolves through the horizon bands, where ground and ink cross in
+     luminance and no chrome could hold contrast. See --chrome in paint(). */
+  opacity: var(--chrome, 1);
+  transition: opacity .25s linear;
+  background: rgb(var(--bg-rgb) / 0.78);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-bottom: 1px solid rgb(var(--line-rgb) / 0.7);
+}
+.nav-in {
+  max-width: 1180px; margin-inline: auto; padding: 0.7rem var(--edge);
+  display: flex; align-items: center; gap: 1.5rem;
+}
+.nav svg { display: block; height: 20px; width: auto; }
+.nav-links { display: flex; gap: 1.4rem; margin-left: auto; }
+.nav-links a {
+  text-decoration: none; color: var(--mute); font-size: 0.86rem;
+  transition: color .18s;
+}
+.nav-links a:hover { color: var(--ink); }
+.nav.chrome-off { pointer-events: none; }
+@media (max-width: 860px) { .nav-links { display: none; } .nav-in { gap: .75rem; } }
+
+/* ── buttons ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.6rem;
+  padding: 0.82rem 1.35rem;
+  border-radius: 10px;
+  font-family: var(--text); font-size: 0.96rem; font-weight: 600;
+  text-decoration: none; border: 1px solid transparent;
+  transition: transform .18s cubic-bezier(.2,.8,.3,1), box-shadow .25s, background-color .2s, border-color .2s;
+  white-space: nowrap;
+}
+.btn-primary {
+  background: linear-gradient(180deg, var(--amber-300), var(--amber-500));
+  color: #1A1204;
+  box-shadow: 0 0 0 1px rgb(255 176 32 / .5), 0 10px 34px -12px rgb(255 176 32 / .85);
+}
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgb(255 176 32 / .6), 0 18px 46px -14px rgb(255 176 32 / .95); }
+.btn-ghost { border-color: var(--line); color: var(--ink); background: rgb(var(--ink-rgb) / .04); }
+.btn-ghost:hover { border-color: rgb(var(--ink-rgb) / .38); transform: translateY(-2px); }
+.btn-sm { padding: 0.5rem 0.9rem; font-size: 0.84rem; border-radius: 8px; }
+
+/* ── hero ── */
+.hero { padding-block: clamp(3.5rem, 9vh, 7rem) clamp(4rem, 9vh, 7rem); }
+.hero-mark { display: block; width: clamp(210px, 30vw, 320px); height: auto; margin-bottom: 2rem; }
+.h1-quiet { color: var(--mute); display: block; }
+.h1-loud  { display: block; color: var(--amber-400); text-shadow: 0 0 44px rgb(255 194 71 / .28); }
+.hero p.lede { margin-top: 1.6rem; font-size: clamp(1.05rem, 0.98rem + 0.4vw, 1.3rem); }
+.cta { display: flex; flex-wrap: wrap; gap: 0.85rem; margin-top: 2.4rem; align-items: center; }
+.cta-note { margin-top: 1.1rem; font-size: 0.86rem; color: var(--mute); }
+.cta-note a { color: var(--accent); text-underline-offset: 3px; }
+.meta {
+  display: flex; flex-wrap: wrap; gap: 0.55rem 1.4rem;
+  margin-top: 2.6rem; padding-top: 1.4rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 0.74rem; letter-spacing: .06em;
+  color: var(--mute); text-transform: uppercase;
+}
+
+/* the one moving amber element in the interface */
+.caret {
+  display: inline-block; width: 3px; height: 0.92em;
+  background: var(--amber-400); vertical-align: -0.1em;
+  margin-left: 0.12em; border-radius: 1px;
+  box-shadow: 0 0 12px 1px rgb(255 194 71 / .8);
+  animation: blink 1.15s steps(1) infinite;
+}
+@keyframes blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+
+/* ── panels ── */
+.panel {
+  background: rgb(var(--panel-rgb));
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.grid { display: grid; gap: 1rem; }
+/* min() guards the track floor: a bare minmax(400px,…) stays 400px wide even in a
+   360px viewport and pushes the page sideways. */
+.cols-3 { grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); }
+.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); }
+
+/* ── beat cards ── */
+.beat { padding: 1.6rem; display: flex; flex-direction: column; gap: .9rem; }
+.beat .k {
+  font-family: var(--mono); font-size: .82rem; color: var(--accent);
+  border: 1px solid rgb(var(--accent-rgb) / .35);
+  background: rgb(var(--accent-rgb) / .07);
+  padding: .32rem .6rem; border-radius: 7px; align-self: flex-start;
+}
+.beat p { color: var(--mute); font-size: .95rem; }
+.beat strong { color: var(--ink); font-weight: 600; }
+
+/* ── the race ── */
+.race { height: 340vh; }
+.race-stick { position: sticky; top: 0; min-height: 100vh; display: flex; align-items: center; padding-block: 4rem; }
+.clock {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: clamp(2.4rem, 1.4rem + 4vw, 4.4rem); font-weight: 700;
+  letter-spacing: -0.04em; line-height: 1; color: var(--accent);
+}
+.clock small { font-size: .3em; letter-spacing: .1em; color: var(--mute); margin-left: .4em; font-weight: 500; }
+.bars { display: flex; flex-direction: column; gap: 1.15rem; margin-top: 2.2rem; }
+.bar-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: .42rem; }
+.bar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.bar-name { font-size: .92rem; font-weight: 600; }
+.bar-name span { display: block; font-weight: 400; font-size: .78rem; color: var(--mute); }
+.bar-val {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: .84rem; color: var(--mute); white-space: nowrap;
+}
+.bar-track {
+  position: relative; height: 20px; border-radius: 4px;
+  background: rgb(var(--ink-rgb) / .07);
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute; inset-block: 0; left: 0; width: 0;
+  border-radius: 0 4px 4px 0;
+  background: rgb(var(--ink-rgb) / .28);
+}
+.bar-row.is-hero .bar-fill {
+  background: linear-gradient(90deg, var(--amber-500), var(--amber-300));
+  box-shadow: 0 0 26px -2px rgb(255 176 32 / .8);
+}
+.bar-row.is-hero .bar-name { color: var(--accent); }
+.bar-row.is-range .bar-fill { border-radius: 0; }
+.bar-done {
+  font-family: var(--mono); font-size: .74rem; color: var(--accent);
+  opacity: 0; transition: opacity .3s;
+}
+.bar-row.done .bar-done { opacity: 1; }
+.axis {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: .7rem; color: var(--mute);
+  margin-top: .9rem; padding-top: .5rem; border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.zoom {
+  margin-top: 1.6rem; padding: 1rem 1.15rem;
+  border: 1px dashed var(--line); border-radius: 10px;
+}
+.zoom-label { font-family: var(--mono); font-size: .7rem; color: var(--mute); letter-spacing: .12em; text-transform: uppercase; }
+
+/* ── data table (the non-visual reading of the same numbers) ── */
+details.data { margin-top: 1.6rem; }
+details.data summary {
+  cursor: pointer; font-family: var(--mono); font-size: .78rem; color: var(--mute);
+  padding: .4rem 0;
+}
+details.data summary:hover { color: var(--ink); }
+.tw { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .87rem; margin-top: .8rem; }
+th, td { text-align: left; padding: .55rem .8rem; border-bottom: 1px solid var(--line); }
+th { font-family: var(--mono); font-size: .72rem; letter-spacing: .09em; text-transform: uppercase; color: var(--mute); font-weight: 500; }
+td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ── pipeline ── */
+.pipe { display: grid; gap: 1.4rem; }
+.hop {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 1.1rem; align-items: start;
+  padding: 1.05rem 1.2rem; border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgb(var(--panel-rgb));
+  opacity: 0; transform: translateY(14px);
+  transition: opacity .6s cubic-bezier(.2,.8,.3,1), transform .6s cubic-bezier(.2,.8,.3,1);
+}
+.hop.in { opacity: 1; transform: none; }
+.hop-dot {
+  width: 11px; height: 11px; border-radius: 50%; margin-top: .5rem;
+  background: var(--amber-400); box-shadow: 0 0 14px 2px rgb(255 194 71 / .5); flex: none;
+}
+.hop-t { display: block; font-weight: 600; font-size: .96rem; }
+.hop-d { display: block; color: var(--mute); font-size: .88rem; margin-top: .2rem; line-height: 1.5; }
+.hop-ms { font-family: var(--mono); font-size: .8rem; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hop-line { width: 1px; height: 22px; background: var(--line); margin-left: 1.75rem; }
+
+.callout {
+  border-left: 2px solid var(--accent);
+  padding: .2rem 0 .2rem 1.1rem;
+  color: var(--mute); font-size: .93rem;
+  max-width: var(--measure);
+}
+
+/* ── transition bands: graphics only, no body copy.
+      The ink↔ground luminance crossover happens inside these, by design. ── */
+.gate { height: 170vh; position: relative; }
+.gate-head { padding-top: 12vh; }
+.gate-head .display {
+  font-size: clamp(2rem, 1rem + 4.6vw, 4rem);
+  max-width: 16ch;
+  text-shadow: 0 2px 40px rgb(0 0 0 / .45);
+}
+.horizon {
+  position: sticky; top: 0; height: 100vh; display: grid; place-items: center;
+  pointer-events: none;
+}
+.horizon svg { width: min(1100px, 92vw); height: auto; overflow: visible; }
+
+/* ── features ── */
+.feat { padding: 1.35rem 1.4rem; display: flex; flex-direction: column; gap: .55rem; height: 100%; }
+.feat-ico { width: 26px; height: 26px; color: var(--accent); }
+.feat h3 { font-size: 1.02rem; }
+.feat p { font-size: .9rem; color: var(--mute); }
+.feat code { font-size: .82em; }
+
+/* ── shortcut keyboard ── */
+.keys { display: flex; flex-wrap: wrap; gap: .55rem; }
+.key {
+  font-family: var(--mono); font-size: .82rem;
+  padding: .55rem .8rem; border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgb(var(--panel-rgb));
+  color: var(--ink);
+  cursor: default;
+  box-shadow: 0 2px 0 rgb(var(--line-rgb));
+  transition: transform .14s, border-color .14s, color .14s, background-color .14s, box-shadow .14s;
+}
+.key:hover, .key:focus-visible, .key.on {
+  color: var(--amber-400);
+  border-color: rgb(var(--accent-rgb) / .6);
+  background: rgb(var(--accent-rgb) / .1);
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 rgb(var(--accent-rgb) / .4), 0 0 26px -6px rgb(255 176 32 / .7);
+}
+.key-out {
+  margin-top: 1.4rem; min-height: 4.2rem;
+  display: flex; align-items: center; gap: .9rem;
+  padding: 1rem 1.2rem; border-radius: 12px;
+  border: 1px solid var(--line); background: rgb(var(--panel-rgb));
+}
+.key-out .ko-k { font-family: var(--mono); font-size: .84rem; color: var(--accent); white-space: nowrap; }
+.key-out .ko-a { color: var(--ink); font-size: .95rem; }
+@media (max-width: 620px) { .key-out { flex-direction: column; align-items: flex-start; gap: .3rem; } }
+
+/* ── live editor demo ── */
+.demo {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
+  min-height: 460px;
+  box-shadow: 0 40px 80px -50px rgb(7 11 22 / .6);
+}
+.demo-chrome {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: .7rem;
+  padding: .55rem .9rem; background: var(--night-800); border-bottom: 1px solid #232B42;
+  font-family: var(--mono); font-size: .76rem; color: #8992AB;
+}
+.demo-tab {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .3rem .7rem; border-radius: 7px 7px 0 0;
+  background: var(--night-900); color: var(--paper); border: 1px solid #232B42; border-bottom: none;
+}
+.demo-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber-400); }
+.demo-src {
+  margin: 0; border: none; resize: none;
+  background: var(--night-900); color: #D7DCE8;
+  caret-color: var(--amber-400);
+  font-family: var(--mono); font-size: .82rem; line-height: 1.75;
+  padding: 1.2rem 1.3rem; min-height: 420px;
+  border-right: 1px solid #1E2740;
+  outline-offset: -3px;
+}
+.demo-out {
+  background: var(--paper); color: #16192A;
+  padding: 1.2rem 1.5rem; overflow-y: auto; max-height: 460px;
+  font-family: var(--text); font-size: .92rem; line-height: 1.65;
+}
+.demo-out h1, .demo-out h2, .demo-out h3 { color: #0E1426; margin: 1.1em 0 .4em; letter-spacing: -.02em; }
+.demo-out h1 { font-size: 1.5rem; } .demo-out h2 { font-size: 1.18rem; } .demo-out h3 { font-size: 1rem; }
+.demo-out h1:first-child, .demo-out h2:first-child { margin-top: 0; }
+.demo-out p, .demo-out ul, .demo-out ol, .demo-out blockquote { margin: 0 0 .8em; }
+.demo-out ul, .demo-out ol { padding-left: 1.3em; }
+.demo-out code { background: #E7E3D9; color: #6B4A12; padding: .12em .38em; border-radius: 4px; }
+.demo-out pre { background: #ECE8DE; padding: .8rem 1rem; border-radius: 8px; overflow-x: auto; }
+.demo-out pre code { background: none; padding: 0; color: #2A2418; }
+.demo-out blockquote { border-left: 3px solid #FFB020; padding-left: .9rem; color: #4A4638; }
+.demo-out a { color: #8A5B08; }
+.demo-out hr { border: none; border-top: 1px solid #DDD8CC; margin: 1.2em 0; }
+@media (max-width: 780px) {
+  .demo { grid-template-columns: 1fr; }
+  .demo-src { min-height: 220px; border-right: none; border-bottom: 1px solid #1E2740; }
+  .demo-out { max-height: 320px; }
+}
+
+/* ── security / consent bar mock ── */
+.consent {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .8rem;
+  padding: .8rem 1rem; border-radius: 10px;
+  border: 1px solid rgb(var(--accent-rgb) / .4);
+  background: rgb(var(--accent-rgb) / .08);
+  font-size: .88rem;
+}
+.consent .shield { color: var(--accent); flex: none; }
+.consent .spacer { margin-left: auto; }
+
+/* ── install compare ── */
+.install-card { padding: 1.6rem; display: flex; flex-direction: column; gap: 1rem; height: 100%; }
+.install-card ul { margin: 0; padding-left: 1.15rem; color: var(--mute); font-size: .91rem; display: grid; gap: .4rem; }
+.install-card .tag {
+  align-self: flex-start; font-family: var(--mono); font-size: .68rem; letter-spacing: .12em;
+  text-transform: uppercase; padding: .25rem .6rem; border-radius: 999px;
+}
+.tag-rec { background: rgb(var(--accent-rgb) / .14); color: var(--accent); border: 1px solid rgb(var(--accent-rgb) / .4); }
+.tag-alt { background: rgb(var(--ink-rgb) / .07); color: var(--mute); border: 1px solid var(--line); }
+.warn {
+  margin-top: 1.4rem; padding: 1rem 1.2rem; border-radius: 10px;
+  border: 1px solid var(--line); background: rgb(var(--ink-rgb) / .04);
+  font-size: .9rem; color: var(--mute);
+}
+.warn strong { color: var(--ink); }
+
+/* ── caveats ── */
+.cav { display: grid; gap: .9rem; }
+.cav li { list-style: none; padding-left: 1.5rem; position: relative; color: var(--mute); font-size: .93rem; }
+.cav li::before {
+  content: ""; position: absolute; left: 0; top: .62em;
+  width: 7px; height: 1px; background: var(--mute);
+}
+.cav strong { color: var(--ink); font-weight: 600; }
+ul.cav { margin: 0; padding: 0; }
+
+/* ── footer ── */
+footer { border-top: 1px solid var(--line); padding-block: 3.5rem 4rem; }
+.foot-grid { display: flex; flex-wrap: wrap; gap: 2rem; justify-content: space-between; align-items: flex-start; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 1.4rem; font-size: .9rem; }
+.foot-links a { color: var(--mute); text-decoration: none; }
+.foot-links a:hover { color: var(--accent); }
+.foot-note { font-size: .82rem; color: var(--mute); max-width: 42ch; }
+
+/* ── reveal ── */
+.rv { opacity: 0; transform: translateY(18px); transition: opacity .7s cubic-bezier(.2,.8,.3,1), transform .7s cubic-bezier(.2,.8,.3,1); }
+.rv.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rv, .hop { opacity: 1 !important; transform: none !important; transition: none !important; }
+  .caret { animation: none; }
+  .race { height: auto; }
+  .race-stick { position: static; min-height: 0; }
+  .gate { height: auto; padding-block: 5rem; }
+  .horizon { position: static; height: auto; }
+  .btn { transition: none; }
+  * { scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="sky" aria-hidden="true"></div>
+<canvas class="stars" aria-hidden="true"></canvas>
+
+<!-- ══════════════════ nav ══════════════════ -->
+<nav class="nav">
+  <div class="nav-in">
+    <a href="#top" aria-label="kunang — home" style="display:flex;align-items:center;gap:.6rem;text-decoration:none">
+      <svg viewBox="0 0 100 100" width="22" height="22" aria-hidden="true" style="height:22px">
+        <rect width="100" height="100" rx="24" fill="#0E1426"/>
+        <path d="M22 74V32l28 30 28-30v42" fill="none" stroke="#FFC247" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="78" cy="32" r="9" fill="#FFFBEC"/>
+      </svg>
+      <svg viewBox="-8 14 336 126" aria-hidden="true" style="height:15px">
+        <g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6,26 V100 M40,58 L12,80 M20,74 L42,100"/>
+          <g transform="translate(54,0)"><path d="M0,58 V79 A21,21 0 0 0 42,79 V58"/></g>
+          <g transform="translate(108,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+          <g transform="translate(162,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V100"/></g>
+          <g transform="translate(216,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+          <g transform="translate(270,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V110 A21,21 0 0 1 12,127"/></g>
+        </g>
+      </svg>
+    </a>
+    <div class="nav-links">
+      <a href="#speed">Speed</a>
+      <a href="#features">Features</a>
+      <a href="#keys">Shortcuts</a>
+      <a href="#safe">Safe by default</a>
+      <a href="#install">Install</a>
+    </div>
+    <a class="btn btn-primary btn-sm" href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-portable-0.1.2.exe">Download</a>
+  </div>
+</nav>
+
+<main id="top">
+
+<!-- ══════════════════ 1 · hero ══════════════════ -->
+<section class="hero" data-dawn="0">
+  <div class="wrap">
+    <svg class="hero-mark" viewBox="-8 14 336 126" role="img" aria-label="kunang">
+      <g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6,26 V100 M40,58 L12,80 M20,74 L42,100"/>
+        <g transform="translate(54,0)"><path d="M0,58 V79 A21,21 0 0 0 42,79 V58"/></g>
+        <g transform="translate(108,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+        <g transform="translate(162,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V100"/></g>
+        <g transform="translate(216,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+        <g transform="translate(270,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V110 A21,21 0 0 1 12,127"/></g>
+      </g>
+    </svg>
+
+    <p class="eyebrow">Windows · v0.1.2 · MIT</p>
+
+    <h1>
+      <span class="h1-quiet">Notepad for <code style="font-size:.86em;color:inherit">.txt</code>.</span>
+      <span class="h1-loud">kunang for <span style="font-family:var(--mono);font-size:.86em">.md</span>.<span class="caret"></span></span>
+    </h1>
+
+    <p class="lede">
+      A <strong>fast, simple Markdown viewer and editor</strong> for Windows. Double-click a
+      <code>.md</code> file and it opens <em>rendered</em> — in about <strong>47&nbsp;milliseconds</strong>,
+      not the one to three seconds a full editor takes. One keystroke gets you a real
+      two-pane live-preview editor. Another gets you back.
+    </p>
+
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-portable-0.1.2.exe">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
+        Download portable · 0.1.2
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/awirayaksa/kunang">
+        <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        View source
+      </a>
+    </div>
+
+    <p class="cta-note">
+      Prefer an installer?
+      <a href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-setup-0.1.2.exe">kunang-setup-0.1.2.exe</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/awirayaksa/kunang/releases">All releases</a>
+    </p>
+
+    <div class="meta">
+      <span>Single file · ~144 MB</span>
+      <span>No admin rights</span>
+      <span>No install step</span>
+      <span>Open source</span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 2 · the three-beat ══════════════════ -->
+<section class="band" data-dawn="0.05">
+  <div class="wrap">
+    <p class="eyebrow rv">The whole product</p>
+    <h2 class="rv">One key between<br>reading and writing.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      Most of the time you want to glance at a rendered document, occasionally fix a line,
+      and close it. kunang is built around exactly that, and nothing else.
+    </p>
+
+    <div class="grid cols-3" style="margin-top:2.6rem">
+      <div class="panel beat rv">
+        <span class="k">Double-click .md</span>
+        <p><strong>Rendered view mode, immediately.</strong> Headings, tables, code, links —
+        a real document, not a wall of asterisks. No splash screen, no workspace to pick.</p>
+      </div>
+      <div class="panel beat rv">
+        <span class="k">Ctrl + E</span>
+        <p><strong>Source left, live preview right.</strong> A CodeMirror&nbsp;6 editor with
+        synced scrolling, so the line you are typing is the line you are watching.</p>
+      </div>
+      <div class="panel beat rv">
+        <span class="k">Esc</span>
+        <p><strong>Back to reading.</strong> Esc backs out one level at a time — the find bar,
+        then edit mode, then the tab, then the window. It never surprises you.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 3 · the race ══════════════════ -->
+<section class="race" id="speed" data-dawn="0.11">
+  <div class="race-stick">
+    <div class="wrap" style="width:100%">
+      <p class="eyebrow">Double-click → painted</p>
+      <div style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-end;justify-content:space-between">
+        <h2 style="max-width:13ch">A race that<br>ends early.</h2>
+        <div class="clock" aria-hidden="true"><span id="clock-n">0</span><small>MS ELAPSED</small></div>
+      </div>
+
+      <div class="bars" id="bars" role="img" aria-label="Time from double-click to a visible document: kunang 47 milliseconds, Notepad 80 to 200 milliseconds, full editors 1000 to 3000 milliseconds. Full figures in the table below.">
+        <div class="bar-row is-hero" data-start="47" data-end="47">
+          <div class="bar-head">
+            <span class="bar-name">kunang <span>warm — the resident host is already running</span></span>
+            <span class="bar-val">47 ms <span class="bar-done">✓ painted</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill"></div></div>
+        </div>
+        <div class="bar-row is-range" data-start="80" data-end="200">
+          <div class="bar-head">
+            <span class="bar-name">Notepad <span>opens .txt — but cannot render Markdown at all</span></span>
+            <span class="bar-val">80–200 ms <span class="bar-done">✓ painted</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill"></div></div>
+        </div>
+        <div class="bar-row is-range" data-start="1000" data-end="3000">
+          <div class="bar-head">
+            <span class="bar-name">A full editor <span>VS&nbsp;Code, Typora, Obsidian — cold</span></span>
+            <span class="bar-val">1,000–3,000 ms <span class="bar-done">✓ painted</span></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill"></div></div>
+        </div>
+      </div>
+
+      <div class="axis" aria-hidden="true"><span>0 ms</span><span>1,000</span><span>2,000</span><span>3,000 ms</span></div>
+
+      <div class="zoom">
+        <span class="zoom-label">The first 250 ms, magnified 12×</span>
+        <div class="bars" id="zoom-bars" style="margin-top:.9rem;gap:.7rem" aria-hidden="true">
+          <div class="bar-row is-hero" data-start="47" data-end="47" data-max="250">
+            <div class="bar-head"><span class="bar-name" style="font-size:.82rem">kunang</span><span class="bar-val">47 ms</span></div>
+            <div class="bar-track" style="height:14px"><div class="bar-fill"></div></div>
+          </div>
+          <div class="bar-row is-range" data-start="80" data-end="200" data-max="250">
+            <div class="bar-head"><span class="bar-name" style="font-size:.82rem">Notepad</span><span class="bar-val">80–200 ms</span></div>
+            <div class="bar-track" style="height:14px"><div class="bar-fill"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <details class="data">
+        <summary>Read the numbers as a table</summary>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Path</th><th class="num">Time to a visible document</th><th>Condition</th></tr></thead>
+            <tbody>
+              <tr><td>kunang</td><td class="num">47 ms (p50) · 57 ms (p95)</td><td>Warm host, measured by <code>npm run bench</code></td></tr>
+              <tr><td>kunang</td><td class="num">~960 ms</td><td>Cold — no host running yet</td></tr>
+              <tr><td>Notepad</td><td class="num">80–200 ms</td><td>Cold, plain text only</td></tr>
+              <tr><td>VS&nbsp;Code / Typora / Obsidian</td><td class="num">1,000–3,000 ms</td><td>Cold Electron-class boot</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="lede" style="font-size:.85rem;margin-top:.9rem">
+          Linear scale. kunang's figure is the warm path and is stated as such —
+          the cold path is in the table too.
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 4 · how it stays fast ══════════════════ -->
+<section class="band" data-dawn="0.2">
+  <div class="wrap">
+    <p class="eyebrow rv">The trick</p>
+    <h2 class="rv" style="max-width:18ch">The double-click path<br>never boots Electron.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      A cold Electron window costs 800&nbsp;ms to 2&nbsp;s. So the <code>.md</code> file
+      association does not point at Electron. It points at a 2.4&nbsp;MB Go stub whose only
+      job is to reach an already-running host over a named pipe. The host stays resident
+      after you close a window, so every open after the first is warm.
+    </p>
+
+    <div class="grid cols-2" style="margin-top:2.8rem;gap:2.4rem;align-items:start">
+      <div class="pipe" id="pipe">
+        <div class="hop"><span class="hop-dot"></span><span><span class="hop-t">Explorer runs kunangstub.exe</span><span class="hop-d">Go, ~2.4 MB, GUI subsystem — no console flash</span></span><span class="hop-ms">~5 ms</span></div>
+        <div class="hop-line" aria-hidden="true"></div>
+        <div class="hop"><span class="hop-dot"></span><span><span class="hop-t">Connects to <code>\\.\pipe\kunang.&lt;secret&gt;</code></span><span class="hop-d">Grants foreground rights, writes argv + cwd + t0</span></span><span class="hop-ms">13.6 ms</span></div>
+        <div class="hop-line" aria-hidden="true"></div>
+        <div class="hop"><span class="hop-dot"></span><span><span class="hop-t">Resident host takes the payload</span><span class="hop-d">Hands it to the window you were last looking at, or to a pre-warmed hidden one</span></span><span class="hop-ms">+0.0 ms</span></div>
+        <div class="hop-line" aria-hidden="true"></div>
+        <div class="hop"><span class="hop-dot"></span><span><span class="hop-t">Renderer opens a tab and paints</span><span class="hop-d">markdown-it + highlight.js; KaTeX and Mermaid only if the document needs them</span></span><span class="hop-ms">+15.4 ms</span></div>
+        <div class="hop-line" aria-hidden="true"></div>
+        <div class="hop"><span class="hop-dot"></span><span><span class="hop-t">Window shows — and rebuilds its spare</span><span class="hop-d">A fresh hidden window is built immediately, ready for the next double-click</span></span><span class="hop-ms">+17.5 ms</span></div>
+      </div>
+
+      <div>
+        <div class="panel" style="padding:1.5rem">
+          <p class="eyebrow" style="margin-bottom:1rem">Measured, not estimated</p>
+          <div class="tw">
+            <table>
+              <thead><tr><th>Hop</th><th class="num">p50</th><th class="num">p95</th></tr></thead>
+              <tbody>
+                <tr><td>stub entry → pipe read</td><td class="num">13.6 ms</td><td class="num">16.7 ms</td></tr>
+                <tr><td>→ dispatched to renderer</td><td class="num">+0.0 ms</td><td class="num">—</td></tr>
+                <tr><td>→ renderer painted</td><td class="num">+15.4 ms</td><td class="num">—</td></tr>
+                <tr><td>→ window shown</td><td class="num">+17.5 ms</td><td class="num">—</td></tr>
+                <tr><td><strong>Total</strong></td><td class="num"><strong>47.0 ms</strong></td><td class="num"><strong>57.3 ms</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <p class="callout" style="margin-top:1.6rem">
+          <code>npm run bench</code> launches the real stub 50 times — the same binary Explorer
+          runs on a double-click — so the numbers include process creation and the pipe
+          handshake. Figures move a few milliseconds with machine load; the gate is the
+          contract, not the exact number.
+        </p>
+        <p class="callout" style="margin-top:1.2rem">
+          Cold, with no host running, bringing the host up takes about <strong>960&nbsp;ms</strong>;
+          the very next open is 59.6&nbsp;ms. The installer adds a logon task that warms the
+          host 30 seconds after you sign in, so even the first open of the day is fast.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ gate · dawn ══════════════════ -->
+<section class="gate" data-dawn-from="0.2" data-dawn-to="1">
+  <div class="wrap gate-head">
+    <p class="display">Then it gets out of the way.</p>
+  </div>
+  <div class="horizon" aria-hidden="true">
+    <svg viewBox="0 0 1000 300" fill="none">
+      <defs>
+        <linearGradient id="trail" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stop-color="#FFB020" stop-opacity="0"/>
+          <stop offset="0.35" stop-color="#FFB020" stop-opacity="0.75"/>
+          <stop offset="0.72" stop-color="#FFD980"/>
+          <stop offset="1" stop-color="#FFE9A8"/>
+        </linearGradient>
+        <radialGradient id="orb" cx="0.4" cy="0.35" r="0.7">
+          <stop offset="0" stop-color="#FFFBEC"/>
+          <stop offset="0.45" stop-color="#FFD980"/>
+          <stop offset="1" stop-color="#FFB020"/>
+        </radialGradient>
+        <radialGradient id="sun" cx="0.5" cy="1" r="0.75">
+          <stop offset="0" stop-color="#FFC247" stop-opacity="0.55"/>
+          <stop offset="1" stop-color="#FFC247" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <ellipse cx="500" cy="272" rx="470" ry="150" fill="url(#sun)"/>
+      <path id="gate-path" d="M170,262 L170,86 L500,236 L830,86 L830,262"
+            stroke="url(#trail)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle id="gate-orb" cx="830" cy="86" r="21" fill="url(#orb)"/>
+      <circle cx="822" cy="78" r="5.5" fill="#FFFBEC" fill-opacity="0.9"/>
+      <line x1="30" y1="272" x2="970" y2="272" stroke="#FFC247" stroke-opacity="0.35" stroke-width="1.5"/>
+    </svg>
+  </div>
+</section>
+
+<!-- ══════════════════ 5 · features ══════════════════ -->
+<section class="band" id="features" data-dawn="1">
+  <div class="wrap">
+    <p class="eyebrow rv">Everything it does</p>
+    <h2 class="rv" style="max-width:16ch">Small app.<br>Not a simple one.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      Fast is the headline. But a document editor earns trust in the details —
+      what happens to your encoding, your line endings, your unsaved buffer when the file
+      changes underneath you.
+    </p>
+
+    <div class="grid cols-3" style="margin-top:2.8rem">
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20M7 6V4M13 6V4"/></svg>
+        <h3>Tabs that behave</h3>
+        <p>Every open lands as a tab in the window you were last looking at. Drag to reorder;
+        drag one <em>off</em> the strip and it gets a window of its own — a move, never a copy.
+        The strip only appears once there is more than one document.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 4v16"/></svg>
+        <h3>Two-pane live preview</h3>
+        <p>Source on the left in CodeMirror&nbsp;6, rendered output on the right, updated
+        through morphdom so the preview never flickers or loses your place. Scroll one
+        pane, the other follows.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+        <h3>Outline sidebar</h3>
+        <p><code>Ctrl+\</code> opens a heading outline for long documents. Click to jump;
+        the position you were at is remembered per file, so reopening lands you where
+        you left off.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h9l7 7v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M13 4v6h6"/><path d="M8 15h6"/></svg>
+        <h3>Encoding survives the round trip</h3>
+        <p>UTF-8, UTF-16 LE/BE with BOM sniffing, CP1252 detected by validating the bytes —
+        each written back as it was found, along with the file's dominant line ending.
+        Your git diffs stay clean.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+        <h3>Atomic saves</h3>
+        <p>Writes go through Windows' own <code>ReplaceFileW</code>, preserving ACLs and
+        alternate data streams. A CP1252 file that gains a character it cannot represent
+        is promoted to UTF-8 rather than losing it to a <code>?</code>.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        <h3>It watches the file</h3>
+        <p>Changed on disk? A clean buffer reloads silently; a dirty one tells you and waits.
+        Delete the file and the buffer stays — at that point it is the only copy left.
+        Rename it and kunang follows.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8 3 12l4 4M17 8l4 4-4 4M14 4l-4 16"/></svg>
+        <h3>GFM, math and diagrams</h3>
+        <p>markdown-it with GitHub-flavoured Markdown and highlight.js. KaTeX for
+        <code>$…$</code>, Mermaid for <code>```mermaid</code> — both imported
+        <em>only when a document actually contains them</em>, so the fast path never pays
+        for features it does not use.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        <h3>Export self-contained HTML</h3>
+        <p><code>Ctrl+Shift+E</code> writes one HTML file with the styles and images inlined —
+        something you can email, or open on a machine that has never heard of Markdown.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" stroke="none"/></svg>
+        <h3>Themes, zoom and your own CSS</h3>
+        <p><code>Ctrl+Shift+T</code> cycles auto / light / dark. <code>Ctrl</code> with
+        <code>+</code>, <code>−</code> or <code>0</code> handles zoom. Drop a stylesheet at
+        <code>%LOCALAPPDATA%\kunang\custom.css</code> and restyle the document entirely —
+        <code>F5</code> re-reads it.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 12-4-4m4 4 4-4"/><rect x="3" y="15" width="18" height="6" rx="2"/></svg>
+        <h3>Drag and drop</h3>
+        <p>Drop <code>.md</code> files anywhere to open them, one tab each. Drop an image
+        while editing and it is inserted as Markdown, linked relative to the open document.
+        Relative links between documents open in a tab.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 12h8"/></svg>
+        <h3>Sessions come back</h3>
+        <p>Open documents are remembered, in the order you arranged them. Restored tabs are
+        created empty and only read when you return to one — so a fifty-file session costs
+        nothing on the open path. Files that vanished are dropped quietly.</p>
+      </div>
+
+      <div class="panel feat rv">
+        <svg class="feat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>
+        <h3>Find, print, and a 5 MB guard</h3>
+        <p><code>Ctrl+F</code> finds in the rendered page; edit mode hands over to CodeMirror's
+        own search. <code>Ctrl+P</code> prints. Documents over 5&nbsp;MB skip syntax
+        highlighting and say so, rather than wedging the renderer.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 6 · shortcuts ══════════════════ -->
+<section class="band" id="keys" data-dawn="1">
+  <div class="wrap">
+    <p class="eyebrow rv">Every shortcut</p>
+    <h2 class="rv" style="max-width:15ch">Learn it in<br>one screen.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      Hover or tab through a key to see what it does. That is the entire keymap —
+      there is no second page.
+    </p>
+
+    <div class="keys rv" id="keys" style="margin-top:2.2rem">
+      <button class="key" data-a="Toggle edit mode — source left, live preview right">Ctrl + E</button>
+      <button class="key" data-a="Find in page. In edit mode this hands over to CodeMirror's own search">Ctrl + F</button>
+      <button class="key" data-a="Back out one level — the find bar, then edit mode, then the tab, then the window">Esc</button>
+      <button class="key" data-a="Open a file in a new tab">Ctrl + O</button>
+      <button class="key" data-a="Next tab (also Ctrl + PageDown)">Ctrl + Tab</button>
+      <button class="key" data-a="Previous tab (also Ctrl + PageUp)">Ctrl + Shift + Tab</button>
+      <button class="key" data-a="Move the current tab along the strip">Ctrl + Shift + PageUp / PageDown</button>
+      <button class="key" data-a="Save the current document — atomically, via ReplaceFileW">Ctrl + S</button>
+      <button class="key" data-a="Save As">Ctrl + Shift + S</button>
+      <button class="key" data-a="Toggle the outline sidebar">Ctrl + \</button>
+      <button class="key" data-a="Export a self-contained HTML file, styles and images inlined">Ctrl + Shift + E</button>
+      <button class="key" data-a="Cycle theme — auto, light, dark">Ctrl + Shift + T</button>
+      <button class="key" data-a="Zoom in, out, or reset">Ctrl + &nbsp;+ &nbsp;/ &nbsp;− &nbsp;/ &nbsp;0</button>
+      <button class="key" data-a="Print">Ctrl + P</button>
+      <button class="key" data-a="Reload from disk — this also re-reads your custom.css">F5</button>
+      <button class="key" data-a="Close the tab. Closes the window when it is the last one">Ctrl + W</button>
+      <button class="key" data-a="Close the window. The resident host survives, so the next open is still warm">Ctrl + Shift + W</button>
+    </div>
+
+    <div class="key-out" id="key-out" aria-live="polite">
+      <span class="ko-k" id="ko-k">Ctrl + E</span>
+      <span class="ko-a" id="ko-a">Toggle edit mode — source left, live preview right</span>
+    </div>
+
+    <p class="lede rv" style="margin-top:1.4rem;font-size:.9rem">
+      The <strong>Tools</strong> menu also carries <em>Register / Unregister as default .md viewer</em>.
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════════ 7 · live demo ══════════════════ -->
+<section class="band" data-dawn="1">
+  <div class="wrap">
+    <p class="eyebrow rv">Try the idea</p>
+    <h2 class="rv" style="max-width:17ch">This is what<br>Ctrl+E looks like.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      A rough sketch of edit mode, running right here. Type on the left; the right side keeps up.
+      In the real app the editor is CodeMirror&nbsp;6 with syntax highlighting, and the preview
+      is full GitHub-flavoured Markdown.
+    </p>
+
+    <div class="demo rv" style="margin-top:2.2rem">
+      <div class="demo-chrome">
+        <span class="demo-tab"><span class="dot"></span> notes.md</span>
+        <span style="opacity:.6">roadmap.md</span>
+        <span style="margin-left:auto;opacity:.6">UTF-8 · CRLF</span>
+      </div>
+      <textarea class="demo-src" id="demo-src" spellcheck="false" aria-label="Markdown source — editable"># Meeting notes
+
+Double-click a `.md` and it is **already rendered**.
+Press `Ctrl+E` and you get this: source on the left,
+the document on the right.
+
+## What we decided
+
+- Ship the portable build first
+- Keep the host resident between windows
+- Never put Electron on the double-click path
+
+> A cold Electron window costs 800ms to 2s.
+> The stub costs about 5.
+
+### Still open
+
+1. Taskbar grouping
+2. Network-drive paths
+3. `idleTimeoutMinutes`
+
+Read the [source on GitHub](https://github.com/awirayaksa/kunang).
+
+---
+
+*Edit this text — the preview keeps up.*</textarea>
+      <div class="demo-out" id="demo-out"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ gate · dusk ══════════════════ -->
+<section class="gate" data-dawn-from="1" data-dawn-to="0.08">
+  <div class="wrap gate-head">
+    <p class="display">And it stays quiet.</p>
+  </div>
+  <div class="horizon" aria-hidden="true">
+    <svg viewBox="0 0 1000 300" fill="none">
+      <ellipse cx="500" cy="272" rx="470" ry="150" fill="url(#sun)"/>
+      <path d="M170,262 L170,86 L500,236 L830,86 L830,262"
+            stroke="url(#trail)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="830" cy="86" r="21" fill="url(#orb)"/>
+      <circle cx="822" cy="78" r="5.5" fill="#FFFBEC" fill-opacity="0.9"/>
+      <line x1="30" y1="272" x2="970" y2="272" stroke="#FFC247" stroke-opacity="0.35" stroke-width="1.5"/>
+    </svg>
+  </div>
+</section>
+
+<!-- ══════════════════ 8 · security ══════════════════ -->
+<section class="band" id="safe" data-dawn="0.09">
+  <div class="wrap">
+    <p class="eyebrow rv">Safe by default</p>
+    <h2 class="rv" style="max-width:19ch">A Markdown file<br>is untrusted input.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      A single remote <code>&lt;img&gt;</code> in a document is enough to report that you opened
+      it, and from which IP address. So kunang <strong>blocks every remote request by
+      default</strong> and asks first.
+    </p>
+
+    <div class="consent rv" style="margin-top:2rem;max-width:640px">
+      <svg class="shield" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.4-3 8.3-7 9-4-0.7-7-4.6-7-9V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+      <span><strong>3 remote resources blocked</strong> in this document.</span>
+      <span class="spacer"></span>
+      <span class="btn btn-ghost btn-sm" aria-hidden="true">Load them</span>
+    </div>
+    <p class="lede rv" style="margin-top:.9rem;font-size:.86rem">
+      That consent follows the active tab, and switching documents withdraws it. It is
+      deliberately never persisted — the safe state is the one you get by doing nothing.
+    </p>
+
+    <div class="grid cols-2" style="margin-top:2.6rem">
+      <div class="panel feat rv">
+        <h3>The renderer is a sandbox</h3>
+        <p><code>contextIsolation</code>, <code>sandbox: true</code>, no Node integration.
+        It talks to the main process through one narrow <code>contextBridge</code> API and
+        nothing else. Rendered HTML goes through DOMPurify on the way in.</p>
+      </div>
+      <div class="panel feat rv">
+        <h3>Local files, local protocol</h3>
+        <p>Images and links inside a document are served over a custom <code>mdfile://</code>
+        protocol rather than raw file access. External links open in your real browser,
+        not inside the app.</p>
+      </div>
+      <div class="panel feat rv">
+        <h3>Hostile content, handled</h3>
+        <p>Mermaid runs with <code>securityLevel: 'strict'</code> and KaTeX with
+        <code>throwOnError: false</code> — both are handed text straight from a document
+        nobody vouched for. The test suite includes a deliberately hostile corpus.</p>
+      </div>
+      <div class="panel feat rv">
+        <h3>The pipe is unguessable</h3>
+        <p>The named pipe carries a random 32-hex secret stored in
+        <code>%LOCALAPPDATA%\kunang\pipe</code>. Node cannot set pipe ACLs, so an
+        unguessable name is what stops another user's process from driving your host.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 9 · install ══════════════════ -->
+<section class="band" id="install" data-dawn="0.05">
+  <div class="wrap">
+    <p class="eyebrow rv">Install</p>
+    <h2 class="rv" style="max-width:14ch">Pick one.<br>Not both.</h2>
+
+    <div class="grid cols-2" style="margin-top:2.4rem">
+      <div class="panel install-card rv">
+        <span class="tag tag-rec">Recommended</span>
+        <h3>Portable — a single file</h3>
+        <ul>
+          <li>Download <code>kunang-portable-0.1.2.exe</code> (~144 MB) and run it.</li>
+          <li>It unpacks itself to <code>%LOCALAPPDATA%\kunang\app\&lt;version&gt;\</code> in about 4 seconds.</li>
+          <li>Starts the resident host, then registers the <code>.md</code> association once the host is warm.</li>
+          <li>After that the exe has done its job. Double-clicking a <code>.md</code> runs only the 2.4 MB stub.</li>
+          <li>Run it again carrying a newer build and it upgrades in place — keyed on a hash of the payload, not the version number.</li>
+        </ul>
+        <a class="btn btn-primary" style="align-self:flex-start" href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-portable-0.1.2.exe">Download portable · 0.1.2</a>
+      </div>
+
+      <div class="panel install-card rv">
+        <span class="tag tag-alt">Alternative</span>
+        <h3>NSIS installer</h3>
+        <ul>
+          <li><code>kunang-setup-0.1.2.exe</code> — a per-user install, no admin rights.</li>
+          <li>Same result, plus a logon task that re-warms the host 30 seconds after you sign in.</li>
+          <li>That makes even the first open after a reboot fast. The portable build deliberately does not create that task.</li>
+          <li>Uninstalls through Windows the way you would expect.</li>
+        </ul>
+        <a class="btn btn-ghost" style="align-self:flex-start" href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-setup-0.1.2.exe">Download installer · 0.1.2</a>
+      </div>
+    </div>
+
+    <div class="warn rv">
+      <strong>Install one or the other.</strong> They register the same <code>.md</code>
+      association and each wants a resident host at its own path, so the two would compete
+      for the same named pipe.
+    </div>
+
+    <div class="warn rv">
+      <strong>If Windows ignores the association.</strong> First run registers <code>.md</code>
+      for you. But on a machine where you have <em>ever</em> picked a default app for
+      <code>.md</code>, Windows stores a salted hash under
+      <code>…\FileExts\.md\UserChoice</code> that Microsoft made unforgeable specifically to
+      stop apps hijacking associations — so <em>no program can set it</em>, not kunang, not an
+      installer running as admin. Set it yourself: right-click any <code>.md</code> →
+      <em>Open with</em> → <em>Choose another app</em> → kunang → <em>Always</em>.
+    </div>
+
+    <div class="warn rv">
+      <strong>Or build it from source.</strong> Node 20.19+ (or 22.12+) and Go 1.21+, then
+      <code>npm install</code> and <code>npm run package:portable</code>.
+      <a href="https://github.com/awirayaksa/kunang" style="color:var(--accent)">The full build notes are in the README.</a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ 10 · caveats ══════════════════ -->
+<section class="band" data-dawn="0.02">
+  <div class="wrap">
+    <p class="eyebrow rv">Before you download</p>
+    <h2 class="rv" style="max-width:16ch">What it is not.</h2>
+    <p class="lede rv" style="margin-top:1.3rem">
+      kunang is pre-1.0 and feature-complete against its original plan. Here is the honest
+      list, the same one that sits in the README.
+    </p>
+
+    <ul class="cav rv" style="margin-top:2rem;max-width:74ch">
+      <li><strong>Windows only.</strong> The stub is Win32-specific — named pipes,
+      <code>ReplaceFileW</code>, <code>AllowSetForegroundWindow</code>. There is no macOS or
+      Linux build and the architecture does not port cheaply.</li>
+      <li><strong>Expect a SmartScreen prompt.</strong> The portable exe is unsigned,
+      self-extracting and writes to HKCU. That will keep tripping SmartScreen until it is
+      code-signed. The source is public if you would rather build it yourself.</li>
+      <li><strong>It is not small on disk.</strong> ~370 MB unpacked, ~200 MB resident at
+      idle plus 60–80 MB per window — which is exactly why opens go to tabs in an existing
+      window rather than a window each. That is the price of TypeScript instead of C++.</li>
+      <li><strong>Rename detection is a heuristic.</strong> Windows reports a rename as an
+      unrelated delete followed by an add, so they are paired by proximity in time within a
+      directory. Deleting one file and creating another in that window looks identical.
+      It errs toward following the file.</li>
+      <li><strong>Not a zero-footprint portable app.</strong> A resident host and a file
+      association both need a stable path on disk, so it unpacks once and stays.
+      <code>--uninstall</code> plus deleting <code>%LOCALAPPDATA%\kunang</code> removes it
+      completely.</li>
+      <li><strong>Still on the list:</strong> multiple-window stress testing, taskbar
+      grouping, network-drive and WSL paths, and <code>idleTimeoutMinutes</code> — the
+      setting is read but nothing acts on it yet.</li>
+    </ul>
+
+    <div class="cta rv" style="margin-top:3rem">
+      <a class="btn btn-primary" href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-portable-0.1.2.exe">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4.5-4.5M12 15l4.5-4.5M4 20h16"/></svg>
+        Download portable · 0.1.2
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/awirayaksa/kunang">Read the source</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ══════════════════ footer ══════════════════ -->
+<footer data-dawn="0">
+  <div class="wrap foot-grid">
+    <div>
+      <svg viewBox="-8 14 336 126" aria-label="kunang" role="img" style="height:22px;width:auto;display:block">
+        <g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6,26 V100 M40,58 L12,80 M20,74 L42,100"/>
+          <g transform="translate(54,0)"><path d="M0,58 V79 A21,21 0 0 0 42,79 V58"/></g>
+          <g transform="translate(108,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+          <g transform="translate(162,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V100"/></g>
+          <g transform="translate(216,0)"><path d="M0,100 V79 A21,21 0 0 1 42,79 V100"/></g>
+          <g transform="translate(270,0)"><circle cx="21" cy="79" r="21"/><path d="M42,58 V110 A21,21 0 0 1 12,127"/></g>
+        </g>
+      </svg>
+      <p class="foot-note" style="margin-top:1rem">
+        A firefly's flight path traces an <strong>M</strong>. Two hues only — night and amber —
+        and the one place amber moves is the editor caret.
+      </p>
+    </div>
+    <div style="display:grid;gap:1rem">
+      <div class="foot-links">
+        <a href="https://github.com/awirayaksa/kunang">Source</a>
+        <a href="https://github.com/awirayaksa/kunang/releases">Releases</a>
+        <a href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-portable-0.1.2.exe">Portable 0.1.2</a>
+        <a href="https://github.com/awirayaksa/kunang/releases/download/v0.1.2/kunang-setup-0.1.2.exe">Installer 0.1.2</a>
+        <a href="https://github.com/awirayaksa/kunang/blob/main/LICENSE">MIT</a>
+      </div>
+      <p class="foot-note">Windows 10 and 11 · MIT licensed · pre-1.0</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const root = document.documentElement;
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  /* ─────────────────────────────────────────────────────────────
+     DAWN — one scalar drives every surface colour on the page.
+
+     Colour ramps are sampled, not linearly mixed: a straight
+     night→paper interpolation passes through a dead mid-grey.
+     These stops keep the path inside the brand's two hues by
+     routing the warm middle through low-chroma amber.
+     ───────────────────────────────────────────────────────────── */
+  const BG_STOPS = [
+    [0.00, [  7,  11,  22]],  // night-900
+    [0.45, [ 18,  24,  41]],
+    [0.66, [ 46,  38,  32]],  // amber, very low chroma
+    [0.82, [122, 102,  80]],
+    [0.92, [207, 194, 172]],
+    [1.00, [246, 244, 239]]   // paper
+  ];
+  const INK_STOPS = [
+    [0.00, [233, 236, 244]],
+    [0.50, [255, 233, 168]],  // glow
+    [0.70, [255, 194,  71]],  // amber-400 — the ink itself becomes the firefly
+    [0.84, [ 74,  52,  16]],
+    [1.00, [ 22,  25,  42]]
+  ];
+  const ACCENT_STOPS = [
+    [0.00, [255, 194,  71]],  // amber-400 on night
+    [0.70, [255, 176,  32]],
+    [1.00, [154,  99,   6]]   // amber deepened so it still reads on paper
+  ];
+
+  function sample(stops, d) {
+    for (let i = 1; i < stops.length; i++) {
+      if (d <= stops[i][0]) {
+        const [d0, c0] = stops[i - 1], [d1, c1] = stops[i];
+        const t = (d - d0) / (d1 - d0);
+        return [0, 1, 2].map(k => Math.round(lerp(c0[k], c1[k], t)));
+      }
+    }
+    return stops[stops.length - 1][1].slice();
+  }
+  const mix = (a, b, t) => [0, 1, 2].map(k => Math.round(lerp(a[k], b[k], t)));
+  const rgb = c => c[0] + " " + c[1] + " " + c[2];
+
+  /* Build a keyframe track over document scroll position.
+     Text-bearing sections hold a constant dawn; all the change
+     happens inside the .gate sections, which carry no body copy —
+     that is where ink and ground cross in luminance. */
+  let track = [];
+  function buildTrack() {
+    track = [];
+    const els = document.querySelectorAll("[data-dawn], [data-dawn-from]");
+    els.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const top = r.top + scrollY, h = r.height;
+      if (el.hasAttribute("data-dawn-from")) {
+        const a = +el.dataset.dawnFrom, b = +el.dataset.dawnTo;
+        track.push([top + h * 0.18, a], [top + h * 0.82, b]);
+      } else {
+        const d = +el.dataset.dawn;
+        track.push([top, d], [top + h, d]);
+      }
+    });
+    track.sort((p, q) => p[0] - q[0]);
+  }
+
+  function dawnAt(y) {
+    if (!track.length) return 0;
+    if (y <= track[0][0]) return track[0][1];
+    for (let i = 1; i < track.length; i++) {
+      if (y <= track[i][0]) {
+        const [y0, d0] = track[i - 1], [y1, d1] = track[i];
+        if (y1 === y0) return d1;
+        const t = clamp((y - y0) / (y1 - y0), 0, 1);
+        return lerp(d0, d1, t * t * (3 - 2 * t)); // smoothstep
+      }
+    }
+    return track[track.length - 1][1];
+  }
+
+  const nav = document.querySelector(".nav");
+  let lastD = -1, nightLevel = 1;
+  function paint() {
+    const d = clamp(dawnAt(scrollY + innerHeight * 0.5), 0, 1);
+    if (Math.abs(d - lastD) < 0.0015) return;
+    lastD = d;
+    const bg = sample(BG_STOPS, d);
+    const ink = sample(INK_STOPS, d);
+    const accent = sample(ACCENT_STOPS, d);
+    root.style.setProperty("--bg-rgb", rgb(bg));
+    root.style.setProperty("--ink-rgb", rgb(ink));
+    root.style.setProperty("--panel-rgb", rgb(mix(bg, ink, 0.055)));
+    root.style.setProperty("--line-rgb", rgb(mix(bg, ink, 0.17)));
+    root.style.setProperty("--mute-rgb", rgb(mix(ink, bg, 0.32)));
+    root.style.setProperty("--accent-rgb", rgb(accent));
+    nightLevel = clamp(1 - d * 1.6, 0, 1);
+    root.style.setProperty("--night", String(nightLevel));
+
+    // The luminance crossover sits around d ≈ 0.77. Nothing can hold contrast
+    // against a ground that is passing through the ink's own lightness, so the
+    // chrome steps aside rather than sitting there unreadable.
+    const chrome = clamp((Math.abs(d - 0.77) - 0.05) / 0.08, 0, 1);
+    root.style.setProperty("--chrome", String(chrome));
+    nav?.classList.toggle("chrome-off", chrome < 0.06);
+
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", "rgb(" + bg.join(",") + ")");
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     THE RACE — a scroll-scrubbed clock. All bars share one elapsed
+     time, so relative lengths are always true; only the mapping
+     from scroll to time is eased, to give the first 250 ms room.
+     The axis itself stays linear.
+     ───────────────────────────────────────────────────────────── */
+  const raceSec = document.querySelector(".race");
+  const clockN = document.getElementById("clock-n");
+  const rows = [...document.querySelectorAll("#bars .bar-row"), ...document.querySelectorAll("#zoom-bars .bar-row")];
+  const fmt = new Intl.NumberFormat("en-US");
+
+  function race() {
+    if (!raceSec) return;
+    let p;
+    if (reduce) {
+      p = 1;
+    } else {
+      const r = raceSec.getBoundingClientRect();
+      const total = r.height - innerHeight;
+      p = total > 0 ? clamp(-r.top / total, 0, 1) : 1;
+    }
+    const elapsed = 3000 * Math.pow(p, 2.2);
+    clockN.textContent = fmt.format(Math.round(elapsed));
+    rows.forEach(row => {
+      const s = +row.dataset.start, e = +row.dataset.end;
+      const max = +(row.dataset.max || 3000);
+      const fill = row.querySelector(".bar-fill");
+      const shown = clamp(elapsed, 0, e);
+      fill.style.width = (clamp(shown / max, 0, 1) * 100) + "%";
+      row.classList.toggle("done", elapsed >= e); // a range is "painted" only once its slowest end is
+    });
+  }
+
+  /* ── scroll loop ── */
+  let queued = false;
+  function onScroll() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; paint(); race(); });
+  }
+  addEventListener("scroll", onScroll, { passive: true });
+  addEventListener("resize", () => { buildTrack(); paint(); race(); });
+
+  /* ── reveals ── */
+  if (!reduce && "IntersectionObserver" in window) {
+    const io = new IntersectionObserver((es) => {
+      es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+    document.querySelectorAll(".rv").forEach(el => io.observe(el));
+
+    const pipeIo = new IntersectionObserver((es) => {
+      es.forEach(e => {
+        if (!e.isIntersecting) return;
+        [...document.querySelectorAll("#pipe .hop")].forEach((h, i) => setTimeout(() => h.classList.add("in"), i * 130));
+        pipeIo.disconnect();
+      });
+    }, { threshold: 0.2 });
+    const pipe = document.getElementById("pipe");
+    if (pipe) pipeIo.observe(pipe);
+  } else {
+    document.querySelectorAll(".rv, .hop").forEach(el => el.classList.add("in"));
+  }
+
+  /* ── shortcut keyboard ── */
+  const koK = document.getElementById("ko-k"), koA = document.getElementById("ko-a");
+  document.querySelectorAll("#keys .key").forEach(k => {
+    const show = () => {
+      document.querySelectorAll("#keys .key.on").forEach(o => o.classList.remove("on"));
+      k.classList.add("on");
+      koK.textContent = k.textContent.trim();
+      koA.textContent = k.dataset.a;
+    };
+    k.addEventListener("mouseenter", show);
+    k.addEventListener("focus", show);
+    k.addEventListener("click", show);
+  });
+
+  /* ─────────────────────────────────────────────────────────────
+     MINI MARKDOWN — a deliberately small subset, so the page stays
+     a single file with no network requests. The real app uses
+     markdown-it with GFM, highlight.js, KaTeX and Mermaid.
+     ───────────────────────────────────────────────────────────── */
+  const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function inline(s) {
+    return esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" rel="noopener noreferrer" target="_blank">$1</a>')
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  }
+
+  function render(src) {
+    const lines = src.replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let list = null, para = [], fence = null, quote = [];
+
+    const flushP = () => { if (para.length) { out.push("<p>" + inline(para.join(" ")) + "</p>"); para = []; } };
+    const flushL = () => { if (list) { out.push("</" + list + ">"); list = null; } };
+    const flushQ = () => { if (quote.length) { out.push("<blockquote>" + inline(quote.join(" ")) + "</blockquote>"); quote = []; } };
+
+    for (const line of lines) {
+      const f = line.match(/^```(\w*)\s*$/);
+      if (f) {
+        if (fence === null) { flushP(); flushL(); flushQ(); fence = []; }
+        else { out.push("<pre><code>" + esc(fence.join("\n")) + "</code></pre>"); fence = null; }
+        continue;
+      }
+      if (fence !== null) { fence.push(line); continue; }
+
+      if (!line.trim()) { flushP(); flushL(); flushQ(); continue; }
+
+      let m;
+      if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+        flushP(); flushL(); flushQ();
+        const n = Math.min(m[1].length, 6);
+        out.push("<h" + n + ">" + inline(m[2]) + "</h" + n + ">");
+      } else if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+        flushP(); flushL(); flushQ(); out.push("<hr>");
+      } else if ((m = line.match(/^>\s?(.*)$/))) {
+        flushP(); flushL();
+        quote.push(m[1]);                       // consecutive > lines are one quote
+      } else if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) {
+        flushP(); flushQ();
+        if (list !== "ul") { flushL(); out.push("<ul>"); list = "ul"; }
+        out.push("<li>" + inline(m[1]) + "</li>");
+      } else if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) {
+        flushP(); flushQ();
+        if (list !== "ol") { flushL(); out.push("<ol>"); list = "ol"; }
+        out.push("<li>" + inline(m[1]) + "</li>");
+      } else if (quote.length) {
+        quote.push(line.trim());                // lazy continuation
+      } else {
+        flushL(); para.push(line.trim());
+      }
+    }
+    if (fence !== null) out.push("<pre><code>" + esc(fence.join("\n")) + "</code></pre>");
+    flushP(); flushL(); flushQ();
+    return out.join("\n");
+  }
+
+  const src = document.getElementById("demo-src");
+  const outEl = document.getElementById("demo-out");
+  if (src && outEl) {
+    const draw = () => { outEl.innerHTML = render(src.value); };
+    src.addEventListener("input", draw);
+    draw();
+  }
+
+  /* ── ambient starfield: cheap, canvas, night-only ── */
+  const cv = document.querySelector(".stars");
+  if (cv && !reduce) {
+    const ctx = cv.getContext("2d");
+    let stars = [], raf = 0;
+    function seed() {
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+      cv.style.width = innerWidth + "px"; cv.style.height = innerHeight + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const n = Math.round((innerWidth * innerHeight) / 26000);
+      stars = Array.from({ length: n }, () => ({
+        x: Math.random() * innerWidth, y: Math.random() * innerHeight,
+        r: Math.random() * 1.1 + 0.25, a: Math.random() * Math.PI * 2,
+        s: Math.random() * 0.9 + 0.25
+      }));
+    }
+    function tick(t) {
+      // Daylight sections hide the field entirely — don't pay to draw it.
+      if (nightLevel < 0.02) { raf = requestAnimationFrame(tick); return; }
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      for (const s of stars) {
+        const tw = 0.32 + 0.68 * (0.5 + 0.5 * Math.sin(t / 900 * s.s + s.a));
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,233,168," + (tw * 0.42) + ")";
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    seed(); raf = requestAnimationFrame(tick);
+    addEventListener("resize", seed);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) cancelAnimationFrame(raf); else raf = requestAnimationFrame(tick);
+    });
+  }
+
+  /* ── go ── */
+  buildTrack();
+  paint();
+  race();
+  addEventListener("load", () => { buildTrack(); paint(); race(); });
+})();
+</script>
+</body>
+</html>
